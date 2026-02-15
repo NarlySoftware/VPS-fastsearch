@@ -482,7 +482,7 @@ client = FastSearchClient()
     uname -a
     python3 --version
     
-    echo "=== FastSearch ==="
+    echo "=== VPS-FastSearch ==="
     fastsearch --version 2>/dev/null || pip show fastsearch
     
     echo "=== Config ==="
@@ -506,7 +506,7 @@ client = FastSearchClient()
 
 When reporting issues, include:
 - OS and Python version
-- FastSearch version
+- VPS-FastSearch version
 - Config file (sanitized)
 - Error message (full traceback)
 - Steps to reproduce

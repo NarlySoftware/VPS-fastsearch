@@ -1,4 +1,4 @@
-"""Core classes for FastSearch: Embedder, Reranker, and SearchDB."""
+"""Core classes for VPS-FastSearch: Embedder, Reranker, and SearchDB."""
 
 from pathlib import Path
 from typing import Any

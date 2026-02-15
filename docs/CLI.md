@@ -1,6 +1,6 @@
 # CLI Reference
 
-FastSearch provides a comprehensive command-line interface for indexing, searching, and managing the daemon.
+VPS-FastSearch provides a comprehensive command-line interface for indexing, searching, and managing the daemon.
 
 ## Global Options
 
@@ -159,7 +159,7 @@ fastsearch --db project.db search "query"
 Search: 'configuration' (hybrid [daemon], 4ms)
 
 [1] CONFIGURATION.md (chunk 0) - RRF: 0.0323, BM25 #1, Vec #3
-    # Configuration Reference FastSearch uses a YAML configuration file...
+    # Configuration Reference VPS-FastSearch uses a YAML configuration file...
 
 [2] README.md (chunk 5) - RRF: 0.0298, BM25 #2, Vec #7
     ## Configuration Create config at `~/.config/vps_fastsearch/config.yaml`...
@@ -271,7 +271,7 @@ Deleted 8 chunks from /path/to/README.md
 
 ## daemon
 
-Manage the FastSearch daemon server.
+Manage the VPS-VPS-FastSearch daemon server.
 
 ### daemon start
 
@@ -328,7 +328,7 @@ vps-fastsearch daemon status [OPTIONS]
 
 **Output (text):**
 ```
-FastSearch Daemon Status
+VPS-FastSearch Daemon Status
 ========================================
 Uptime:         2h 15m 30s
 Requests:       1234

@@ -1,5 +1,5 @@
 [Unit]
-Description=FastSearch Memory Daemon
+Description=VPS-FastSearch Memory Daemon
 Documentation=https://github.com/your-username/vps-fastsearch
 After=network.target
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FastSearch Phase 2 Test Suite
+VPS-FastSearch Phase 2 Test Suite
 
 Runs comprehensive tests for daemon mode and generates benchmark report.
 """
@@ -136,7 +136,7 @@ def get_daemon_status() -> dict | None:
 def main():
     """Run all tests."""
     print("=" * 60)
-    print("FastSearch Phase 2 Test Suite")
+    print("VPS-FastSearch Phase 2 Test Suite")
     print("=" * 60)
     print()
     
@@ -453,7 +453,7 @@ def generate_report(suite: TestSuite):
     html = f'''<!DOCTYPE html>
 <html>
 <head>
-    <title>FastSearch Daemon Benchmark Report</title>
+    <title>VPS-FastSearch Daemon Benchmark Report</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -543,7 +543,7 @@ def generate_report(suite: TestSuite):
     </style>
 </head>
 <body>
-    <h1>🚀 FastSearch Daemon Benchmark Report</h1>
+    <h1>🚀 VPS-FastSearch Daemon Benchmark Report</h1>
     <p>Generated: {suite.end_time.strftime("%Y-%m-%d %H:%M:%S")}</p>
     
     <div class="summary">
@@ -654,7 +654,7 @@ def generate_report(suite: TestSuite):
     </div>
     
     <footer>
-        FastSearch v0.2.0 | Benchmark run on {suite.start_time.strftime("%Y-%m-%d")}
+        VPS-FastSearch v0.2.0 | Benchmark run on {suite.start_time.strftime("%Y-%m-%d")}
     </footer>
 </body>
 </html>

@@ -1,6 +1,6 @@
 # Integration Guide
 
-This guide covers integrating FastSearch with other systems, including Python applications, OpenClaw/Clawdbot, and custom clients.
+This guide covers integrating VPS-FastSearch with other systems, including Python applications, OpenClaw/Clawdbot, and custom clients.
 
 ## Python Integration
 
@@ -10,7 +10,7 @@ This guide covers integrating FastSearch with other systems, including Python ap
 from vps_fastsearch import FastSearchClient, search, embed
 
 # Option 1: Client object (recommended for multiple operations)
-with FastSearchClient() as client:
+with VPS-FastSearchClient() as client:
     results = client.search("query")
     embeddings = client.embed(["text1", "text2"])
 
@@ -31,7 +31,7 @@ from vps_fastsearch import (
 def search_with_fallback(query: str) -> list:
     """Search with graceful fallback."""
     try:
-        with FastSearchClient(timeout=10.0) as client:
+        with VPS-FastSearchClient(timeout=10.0) as client:
             result = client.search(query)
             return result["results"]
     except DaemonNotRunningError:
@@ -50,7 +50,7 @@ def search_with_fallback(query: str) -> list:
 
 ### Async Integration
 
-FastSearch uses blocking I/O. For async applications, use a thread executor:
+VPS-FastSearch uses blocking I/O. For async applications, use a thread executor:
 
 ```python
 import asyncio
@@ -64,7 +64,7 @@ async def async_search(query: str) -> dict:
     loop = asyncio.get_event_loop()
     
     def _search():
-        with FastSearchClient() as client:
+        with VPS-FastSearchClient() as client:
             return client.search(query)
     
     return await loop.run_in_executor(executor, _search)
@@ -93,7 +93,7 @@ def search():
         return jsonify({"error": "Missing query parameter 'q'"}), 400
     
     try:
-        with FastSearchClient(timeout=30.0) as client:
+        with VPS-FastSearchClient(timeout=30.0) as client:
             result = client.search(query, limit=limit, rerank=rerank)
             return jsonify(result)
     except DaemonNotRunningError:
@@ -137,7 +137,7 @@ async def search(
         from concurrent.futures import ThreadPoolExecutor
         
         def _search():
-            with FastSearchClient(timeout=30.0) as client:
+            with VPS-FastSearchClient(timeout=30.0) as client:
                 return client.search(q, limit=limit, rerank=rerank)
         
         loop = asyncio.get_event_loop()
@@ -161,12 +161,12 @@ if __name__ == "__main__":
 
 ## OpenClaw/Clawdbot Integration
 
-FastSearch integrates seamlessly with Clawdbot for semantic search over memory files, documentation, and knowledge bases.
+VPS-FastSearch integrates seamlessly with Clawdbot for semantic search over memory files, documentation, and knowledge bases.
 
 ### Setup
 
 ```bash
-# Install FastSearch in Clawdbot environment
+# Install VPS-FastSearch in Clawdbot environment
 pip install vps-fastsearch[rerank]
 
 # Index Clawdbot workspace
@@ -182,7 +182,7 @@ vps-fastsearch daemon start --detach
 Add to Clawdbot's TOOLS.md:
 
 ```markdown
-### FastSearch
+### VPS-FastSearch
 
 - **Database:** ~/.clawdbot/search.db
 - **Socket:** /tmp/vps_fastsearch.sock
@@ -206,7 +206,7 @@ def search_memory(query: str, limit: int = 5):
     """Search Clawdbot memory files."""
     db_path = Path.home() / ".clawdbot" / "search.db"
     
-    with FastSearchClient() as client:
+    with VPS-FastSearchClient() as client:
         result = client.search(
             query=query,
             db_path=str(db_path),
@@ -242,7 +242,7 @@ def index_file(file_path: str):
         return 0
     
     # Use daemon for embedding
-    with FastSearchClient() as client:
+    with VPS-FastSearchClient() as client:
         texts = [c[0] for c in chunks]
         result = client.embed(texts)
         embeddings = result["embeddings"]
@@ -272,7 +272,7 @@ print(f"Indexed {chunks} chunks")
 
 ## Unix Socket Protocol
 
-FastSearch daemon uses JSON-RPC 2.0 over a Unix socket with length-prefixed framing.
+VPS-FastSearch daemon uses JSON-RPC 2.0 over a Unix socket with length-prefixed framing.
 
 ### Message Format
 
@@ -557,7 +557,7 @@ def index_with_webhook(file_path: str):
     content = Path(file_path).read_text()
     chunks = list(chunk_markdown(content))
     
-    with FastSearchClient() as client:
+    with VPS-FastSearchClient() as client:
         # Index
         texts = [c[0] for c in chunks]
         embeddings = client.embed(texts)["embeddings"]
@@ -584,7 +584,7 @@ from vps_fastsearch import FastSearchClient
 
 def search_with_logging(query: str, **kwargs):
     """Search with event logging."""
-    with FastSearchClient() as client:
+    with VPS-FastSearchClient() as client:
         result = client.search(query, **kwargs)
         
         # Log event
@@ -627,7 +627,7 @@ spec:
 
 ```python
 #!/usr/bin/env python3
-"""Export FastSearch metrics for Prometheus."""
+"""Export VPS-FastSearch metrics for Prometheus."""
 
 from prometheus_client import start_http_server, Gauge
 from vps_fastsearch import FastSearchClient
@@ -642,7 +642,7 @@ models_loaded = Gauge('fastsearch_models_loaded', 'Number of loaded models')
 def collect_metrics():
     """Collect metrics from daemon."""
     try:
-        with FastSearchClient(timeout=5.0) as client:
+        with VPS-FastSearchClient(timeout=5.0) as client:
             status = client.status()
             
             uptime.set(status.get('uptime_seconds', 0))

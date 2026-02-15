@@ -1,6 +1,6 @@
-# Contributing to FastSearch
+# Contributing to VPS-FastSearch
 
-Thanks for your interest in contributing! This document provides guidelines for contributing to FastSearch.
+Thanks for your interest in contributing! This document provides guidelines for contributing to VPS-FastSearch.
 
 ## Getting Started
 

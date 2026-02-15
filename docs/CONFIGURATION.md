@@ -1,6 +1,6 @@
 # Configuration Reference
 
-FastSearch uses a YAML configuration file for all settings.
+VPS-FastSearch uses a YAML configuration file for all settings.
 
 ## Config File Location
 
@@ -30,7 +30,7 @@ fastsearch config path
 ## Complete Configuration Reference
 
 ```yaml
-# FastSearch Configuration
+# VPS-VPS-FastSearch Configuration
 # ~/.config/vps_fastsearch/config.yaml
 
 # =============================================================================

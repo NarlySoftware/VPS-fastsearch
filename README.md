@@ -2,7 +2,7 @@
 
 **Fast hybrid search for CPU-only VPS using ONNX Runtime.**
 
-FastSearch combines BM25 full-text search with vector similarity search using Reciprocal Rank Fusion (RRF). Designed for resource-constrained environments, it features a daemon mode that keeps models loaded for instant search latency.
+VPS-FastSearch combines BM25 full-text search with vector similarity search using Reciprocal Rank Fusion (RRF). Designed for resource-constrained environments, it features a daemon mode that keeps models loaded for instant search latency.
 
 [![Tests](https://github.com/NarlySoftware/VPS-fastsearch/actions/workflows/test.yml/badge.svg)](https://github.com/NarlySoftware/VPS-fastsearch/actions)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -20,7 +20,7 @@ FastSearch combines BM25 full-text search with vector similarity search using Re
 
 ## 🤖 Perfect for AI Assistants on VPS
 
-FastSearch was built to solve a specific problem: **giving AI assistants like [OpenClaw](https://github.com/clawdbot/clawdbot) fast semantic search over conversation history without expensive API calls or GPU hardware.**
+VPS-FastSearch was built to solve a specific problem: **giving AI assistants like [OpenClaw](https://github.com/clawdbot/clawdbot) fast semantic search over conversation history without expensive API calls or GPU hardware.**
 
 ### The Problem
 
@@ -31,9 +31,9 @@ Running an AI assistant on a budget VPS, you need to search through memories, do
 | OpenAI Embeddings API | 200-500ms | $0.0001/query | Minimal | ✅ but adds up |
 | Local Sentence-Transformers | 800ms+ cold | Free | 2GB+ | ❌ too heavy |
 | ChromaDB + local models | 500ms+ | Free | 1GB+ | ⚠️ marginal |
-| **FastSearch (daemon)** | **4ms** | **Free** | **200-600MB** | **✅ built for this** |
+| **VPS-FastSearch (daemon)** | **4ms** | **Free** | **200-600MB** | **✅ built for this** |
 
-### Why FastSearch Wins
+### Why VPS-FastSearch Wins
 
 With daemon mode, the embedding model stays loaded in memory. Searches that would take 850ms cold start complete in **4 milliseconds** — fast enough that your AI assistant can search its entire memory without noticeable delay.
 
@@ -46,7 +46,7 @@ Daemon mode: █                                          4ms
 
 Choose your model based on available RAM:
 
-| VPS RAM | Recommended Model | FastSearch Memory | Search Quality |
+| VPS RAM | Recommended Model | VPS-FastSearch Memory | Search Quality |
 |---------|-------------------|-------------------|----------------|
 | 1GB | bge-small (384 dim) | ~200MB | Good |
 | 2GB | bge-base (768 dim) | ~520MB | Better |
@@ -199,7 +199,7 @@ memory:
 
 ```
 ┌─────────────┐     ┌──────────────────────────────────┐
-│   CLI       │────▶│  FastSearch Daemon               │
+│   CLI       │────▶│  VPS-FastSearch Daemon               │
 └─────────────┘     │  ┌────────────────────────────┐  │
                     │  │  Model Manager (LRU)       │  │
 ┌─────────────┐     │  │  ├── Embedder (450MB)      │  │

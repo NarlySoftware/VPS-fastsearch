@@ -1,6 +1,6 @@
-# FastSearch Documentation
+# VPS-VPS-FastSearch Documentation
 
-Welcome to the FastSearch documentation. FastSearch is a fast hybrid search system combining BM25 full-text search with vector similarity, designed for CPU-only environments.
+Welcome to the VPS-FastSearch documentation. VPS-FastSearch is a fast hybrid search system combining BM25 full-text search with vector similarity, designed for CPU-only environments.
 
 ## Quick Links
 
@@ -18,7 +18,7 @@ Welcome to the FastSearch documentation. FastSearch is a fast hybrid search syst
 
 ## Getting Started
 
-1. **Install FastSearch**
+1. **Install VPS-FastSearch**
    ```bash
    pip install vps-fastsearch
    ```
@@ -57,7 +57,7 @@ docs/
 
 ### Hybrid Search
 
-FastSearch combines two search methods:
+VPS-FastSearch combines two search methods:
 
 - **BM25** — Traditional full-text search using term frequency. Fast and good for exact matches.
 - **Vector Search** — Semantic similarity using embeddings. Good for meaning-based queries.

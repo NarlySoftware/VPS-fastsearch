@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide covers deploying FastSearch in production environments, including VPS setup, systemd configuration, and operational best practices.
+This guide covers deploying VPS-FastSearch in production environments, including VPS setup, systemd configuration, and operational best practices.
 
 ## System Requirements
 
@@ -54,7 +54,7 @@ sudo chown -R fastsearch:fastsearch /var/log/fastsearch
 sudo chown -R fastsearch:fastsearch /run/fastsearch
 ```
 
-### 2. Install FastSearch
+### 2. Install VPS-FastSearch
 
 ```bash
 # Switch to fastsearch user
@@ -65,7 +65,7 @@ cd /opt/fastsearch
 python3.11 -m venv venv
 source venv/bin/activate
 
-# Install FastSearch
+# Install VPS-FastSearch
 pip install --upgrade pip
 pip install "vps-fastsearch[rerank]"
 
@@ -109,7 +109,7 @@ Create `/etc/systemd/system/fastsearch.service`:
 
 ```ini
 [Unit]
-Description=FastSearch Daemon
+Description=VPS-FastSearch Daemon
 After=network.target
 Documentation=https://github.com/your-username/fastsearch
 
@@ -225,7 +225,7 @@ Create `/opt/vps_fastsearch/monitor.sh`:
 
 ```bash
 #!/bin/bash
-# FastSearch monitoring script
+# VPS-FastSearch monitoring script
 
 SOCKET="/run/vps_fastsearch/vps_fastsearch.sock"
 CONFIG="/etc/vps_fastsearch/config.yaml"
@@ -259,7 +259,7 @@ For load balancers, create a simple HTTP wrapper:
 
 ```python
 #!/usr/bin/env python3
-"""Simple HTTP health check for FastSearch."""
+"""Simple HTTP health check for VPS-FastSearch."""
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from vps_fastsearch import FastSearchClient
@@ -313,7 +313,7 @@ sudo usermod -a -G fastsearch-clients yourapp
 
 ### Firewall
 
-FastSearch uses Unix sockets by default (no network exposure). If you create an HTTP wrapper:
+VPS-FastSearch uses Unix sockets by default (no network exposure). If you create an HTTP wrapper:
 
 ```bash
 # Allow only localhost

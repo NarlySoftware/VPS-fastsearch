@@ -1,4 +1,4 @@
-"""FastSearch daemon with Unix socket server and model management."""
+"""VPS-VPS-FastSearch daemon with Unix socket server and model management."""
 
 import asyncio
 import json
@@ -255,7 +255,7 @@ class ModelManager:
 
 class FastSearchDaemon:
     """
-    Unix socket server for FastSearch operations.
+    Unix socket server for VPS-FastSearch operations.
     
     JSON-RPC 2.0 protocol for requests/responses.
     """
@@ -534,7 +534,7 @@ class FastSearchDaemon:
         pid_path = self.config.daemon.pid_path
         Path(pid_path).write_text(str(os.getpid()))
         
-        logger.info(f"FastSearch daemon started on {socket_path}")
+        logger.info(f"VPS-FastSearch daemon started on {socket_path}")
         
         # Pre-load "always" models
         for slot, model_config in self.config.models.items():
@@ -553,7 +553,7 @@ class FastSearchDaemon:
     
     async def stop(self):
         """Stop the daemon server."""
-        logger.info("Shutting down FastSearch daemon...")
+        logger.info("Shutting down VPS-FastSearch daemon...")
         
         if self._server:
             self._server.close()
@@ -570,11 +570,11 @@ class FastSearchDaemon:
         if os.path.exists(pid_path):
             os.unlink(pid_path)
         
-        logger.info("FastSearch daemon stopped")
+        logger.info("VPS-FastSearch daemon stopped")
 
 
 def run_daemon(config_path: str | None = None, foreground: bool = True, detach: bool = False):
-    """Run the FastSearch daemon."""
+    """Run the VPS-VPS-FastSearch daemon."""
     # Set up logging
     logging.basicConfig(
         level=logging.INFO,
@@ -588,7 +588,7 @@ def run_daemon(config_path: str | None = None, foreground: bool = True, detach: 
         pid = os.fork()
         if pid > 0:
             # Parent - exit
-            print(f"FastSearch daemon started (PID: {pid})")
+            print(f"VPS-FastSearch daemon started (PID: {pid})")
             sys.exit(0)
         
         # Child - create new session

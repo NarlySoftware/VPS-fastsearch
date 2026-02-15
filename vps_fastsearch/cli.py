@@ -1,4 +1,4 @@
-"""FastSearch CLI - Index and search documents with optional daemon mode."""
+"""VPS-FastSearch CLI - Index and search documents with optional daemon mode."""
 
 import sys
 import time
@@ -21,7 +21,7 @@ DEFAULT_DB = "fastsearch.db"
 @click.option("--config", "config_path", default=None, help="Config file path", envvar="FASTSEARCH_CONFIG")
 @click.pass_context
 def cli(ctx, db, config_path):
-    """FastSearch - Fast memory/vector search for CPU-only VPS."""
+    """VPS-FastSearch - Fast memory/vector search for CPU-only VPS."""
     ctx.ensure_object(dict)
     ctx.obj["db_path"] = db
     ctx.obj["config_path"] = config_path
@@ -33,7 +33,7 @@ def cli(ctx, db, config_path):
 
 @cli.group()
 def daemon():
-    """Manage the FastSearch daemon."""
+    """Manage the VPS-VPS-FastSearch daemon."""
     pass
 
 
@@ -42,7 +42,7 @@ def daemon():
 @click.option("--config", "config_path", default=None, help="Config file path")
 @click.pass_context
 def daemon_start(ctx, detach, config_path):
-    """Start the FastSearch daemon."""
+    """Start the VPS-VPS-FastSearch daemon."""
     from .daemon import run_daemon, get_daemon_status
     
     config_path = config_path or ctx.obj.get("config_path")
@@ -54,10 +54,10 @@ def daemon_start(ctx, detach, config_path):
         return
     
     if detach:
-        click.echo("Starting FastSearch daemon in background...")
+        click.echo("Starting VPS-FastSearch daemon in background...")
         run_daemon(config_path=config_path, foreground=False, detach=True)
     else:
-        click.echo("Starting FastSearch daemon (press Ctrl+C to stop)...")
+        click.echo("Starting VPS-FastSearch daemon (press Ctrl+C to stop)...")
         run_daemon(config_path=config_path, foreground=True, detach=False)
 
 
@@ -65,13 +65,13 @@ def daemon_start(ctx, detach, config_path):
 @click.option("--config", "config_path", default=None, help="Config file path")
 @click.pass_context
 def daemon_stop(ctx, config_path):
-    """Stop the FastSearch daemon."""
+    """Stop the VPS-VPS-FastSearch daemon."""
     from .daemon import stop_daemon
     
     config_path = config_path or ctx.obj.get("config_path")
     
     if stop_daemon(config_path):
-        click.echo("FastSearch daemon stopped")
+        click.echo("VPS-FastSearch daemon stopped")
     else:
         click.echo("Daemon is not running", err=True)
 
@@ -102,7 +102,7 @@ def daemon_status(ctx, config_path, output_json):
         minutes = int((uptime % 3600) // 60)
         seconds = int(uptime % 60)
         
-        click.echo("FastSearch Daemon Status")
+        click.echo("VPS-FastSearch Daemon Status")
         click.echo("=" * 40)
         click.echo(f"Uptime:         {hours}h {minutes}m {seconds}s")
         click.echo(f"Requests:       {status.get('request_count', 0)}")

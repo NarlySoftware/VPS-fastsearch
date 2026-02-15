@@ -1,6 +1,6 @@
 # Python API Reference
 
-FastSearch provides a Python API for programmatic access to all features.
+VPS-FastSearch provides a Python API for programmatic access to all features.
 
 ## Installation
 
@@ -17,7 +17,7 @@ pip install "vps-fastsearch[rerank]"
 from vps_fastsearch import FastSearchClient, search, embed
 
 # Use the client (recommended)
-with FastSearchClient() as client:
+with VPS-FastSearchClient() as client:
     results = client.search("query")
 
 # Or use convenience functions
@@ -27,9 +27,9 @@ vectors = embed(["text1", "text2"])
 
 ---
 
-## FastSearchClient
+## VPS-FastSearchClient
 
-The main client class for connecting to the FastSearch daemon.
+The main client class for connecting to the VPS-VPS-FastSearch daemon.
 
 ### Constructor
 
@@ -327,7 +327,7 @@ if client.ping():
 client.close()
 
 # Or use context manager (auto-closes)
-with FastSearchClient() as client:
+with VPS-FastSearchClient() as client:
     results = client.search("query")
 ```
 
@@ -645,7 +645,7 @@ except DaemonNotRunningError:
 
 ```python
 #!/usr/bin/env python3
-"""Example: Index and search with FastSearch."""
+"""Example: Index and search with VPS-FastSearch."""
 
 from pathlib import Path
 from vps_fastsearch import (
@@ -694,7 +694,7 @@ def index_directory(db_path: str, directory: str):
 def search_with_fallback(query: str, db_path: str = "vps_fastsearch.db"):
     """Search using daemon if available, otherwise direct."""
     try:
-        with FastSearchClient() as client:
+        with VPS-FastSearchClient() as client:
             result = client.search(query, db_path=db_path)
             print(f"[daemon] {result['search_time_ms']:.1f}ms")
             return result["results"]

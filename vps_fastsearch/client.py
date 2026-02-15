@@ -1,4 +1,4 @@
-"""FastSearch client library for connecting to the daemon."""
+"""VPS-FastSearch client library for connecting to the daemon."""
 
 import json
 import socket
@@ -10,7 +10,7 @@ from .config import load_config, DEFAULT_SOCKET_PATH
 
 
 class FastSearchError(Exception):
-    """FastSearch client error."""
+    """VPS-FastSearch client error."""
     pass
 
 
@@ -21,7 +21,7 @@ class DaemonNotRunningError(FastSearchError):
 
 class FastSearchClient:
     """
-    Python client for FastSearch daemon.
+    Python client for VPS-VPS-FastSearch daemon.
     
     Usage:
         from vps_fastsearch import FastSearchClient
@@ -39,7 +39,7 @@ class FastSearchClient:
         timeout: float = 30.0,
     ):
         """
-        Initialize FastSearch client.
+        Initialize VPS-FastSearch client.
         
         Args:
             socket_path: Path to Unix socket (default: from config or /tmp/fastsearch.sock)

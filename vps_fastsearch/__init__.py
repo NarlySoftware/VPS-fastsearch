@@ -1,4 +1,4 @@
-"""FastSearch - Fast memory/vector search for CPU-only VPS."""
+"""VPS-FastSearch - Fast memory/vector search for CPU-only VPS."""
 
 from .core import Embedder, Reranker, SearchDB, get_embedder, get_reranker
 from .chunker import chunk_text, chunk_markdown

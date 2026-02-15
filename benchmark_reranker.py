@@ -19,8 +19,8 @@ TEST_QUERIES = [
         "expected_keywords": ["earnings", "proximity", "database", "view", "days"],
     },
     {
-        "query": "FastSearch memory project ONNX",
-        "expected_keywords": ["FastSearch", "memory", "ONNX", "search", "embed"],
+        "query": "VPS-FastSearch memory project ONNX",
+        "expected_keywords": ["VPS-FastSearch", "memory", "ONNX", "search", "embed"],
     },
     {
         "query": "technical documentation setup installation",

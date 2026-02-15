@@ -1,6 +1,6 @@
 # Performance Guide
 
-This guide covers FastSearch performance characteristics, benchmarks, and optimization strategies.
+This guide covers VPS-FastSearch performance characteristics, benchmarks, and optimization strategies.
 
 ## Benchmark Results
 

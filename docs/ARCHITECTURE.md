@@ -1,16 +1,16 @@
-# FastSearch Architecture
+# VPS-VPS-FastSearch Architecture
 
-This document describes the internal architecture of FastSearch, including component design, data flow, and the hybrid search algorithm.
+This document describes the internal architecture of VPS-FastSearch, including component design, data flow, and the hybrid search algorithm.
 
 ## System Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           FastSearch System                              │
+│                           VPS-FastSearch System                              │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │  ┌──────────┐    ┌──────────┐    ┌─────────────────────────────────┐   │
-│  │   CLI    │    │  Python  │    │        FastSearch Daemon         │   │
+│  │   CLI    │    │  Python  │    │        VPS-FastSearch Daemon         │   │
 │  │          │    │  Client  │    │   ┌─────────────────────────┐   │   │
 │  └────┬─────┘    └────┬─────┘    │   │     Model Manager       │   │   │
 │       │               │          │   │  ┌──────────────────┐   │   │   │
@@ -236,7 +236,7 @@ The `FastSearchClient` class provides a Python interface to the daemon.
 
 ## Hybrid Search Algorithm
 
-FastSearch uses **Reciprocal Rank Fusion (RRF)** to combine BM25 and vector search results.
+VPS-FastSearch uses **Reciprocal Rank Fusion (RRF)** to combine BM25 and vector search results.
 
 ### RRF Formula
 
@@ -378,7 +378,7 @@ fastsearch/
 ├── cli.py            # Click CLI commands
 ├── core.py           # Embedder, Reranker, SearchDB
 ├── daemon.py         # Unix socket server, ModelManager
-├── client.py         # FastSearchClient
+├── client.py         # VPS-FastSearchClient
 ├── config.py         # Configuration system
 └── chunker.py        # Text chunking utilities
 ```

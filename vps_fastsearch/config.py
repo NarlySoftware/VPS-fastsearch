@@ -1,4 +1,4 @@
-"""FastSearch configuration system with YAML support."""
+"""VPS-FastSearch configuration system with YAML support."""
 
 import os
 from dataclasses import dataclass, field
@@ -44,7 +44,7 @@ class DaemonConfig:
 
 @dataclass
 class FastSearchConfig:
-    """Complete FastSearch configuration."""
+    """Complete VPS-FastSearch configuration."""
     daemon: DaemonConfig = field(default_factory=DaemonConfig)
     models: dict[str, ModelConfig] = field(default_factory=dict)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
