@@ -4,7 +4,7 @@
 
 FastSearch combines BM25 full-text search with vector similarity search using Reciprocal Rank Fusion (RRF). Designed for resource-constrained environments, it features a daemon mode that keeps models loaded for instant search latency.
 
-[![Tests](https://github.com/NarlySoftware/fastsearch/actions/workflows/test.yml/badge.svg)](https://github.com/NarlySoftware/fastsearch/actions)
+[![Tests](https://github.com/NarlySoftware/VPS-fastsearch/actions/workflows/test.yml/badge.svg)](https://github.com/NarlySoftware/VPS-fastsearch/actions)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 

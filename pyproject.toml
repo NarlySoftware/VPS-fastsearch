@@ -67,10 +67,10 @@ dev = [
 fastsearch = "fastsearch.cli:cli"
 
 [project.urls]
-Documentation = "https://github.com/NarlySoftware/fastsearch#readme"
-Repository = "https://github.com/NarlySoftware/fastsearch"
-Issues = "https://github.com/NarlySoftware/fastsearch/issues"
-Changelog = "https://github.com/NarlySoftware/fastsearch/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/NarlySoftware/VPS-fastsearch#readme"
+Repository = "https://github.com/NarlySoftware/VPS-fastsearch"
+Issues = "https://github.com/NarlySoftware/VPS-fastsearch/issues"
+Changelog = "https://github.com/NarlySoftware/VPS-fastsearch/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]

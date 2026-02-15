@@ -7,7 +7,7 @@ Thanks for your interest in contributing! This document provides guidelines for 
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/NarlySoftware/fastsearch
+   git clone https://github.com/NarlySoftware/VPS-fastsearch
    cd fastsearch
    ```
 3. Install development dependencies:
