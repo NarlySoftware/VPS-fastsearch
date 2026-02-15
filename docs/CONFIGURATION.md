@@ -30,7 +30,7 @@ fastsearch config path
 ## Complete Configuration Reference
 
 ```yaml
-# VPS-VPS-FastSearch Configuration
+# VPS-FastSearch Configuration
 # ~/.config/vps_fastsearch/config.yaml
 
 # =============================================================================

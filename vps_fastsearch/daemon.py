@@ -1,4 +1,4 @@
-"""VPS-VPS-FastSearch daemon with Unix socket server and model management."""
+"""VPS-FastSearch daemon with Unix socket server and model management."""
 
 import asyncio
 import json
@@ -574,7 +574,7 @@ class FastSearchDaemon:
 
 
 def run_daemon(config_path: str | None = None, foreground: bool = True, detach: bool = False):
-    """Run the VPS-VPS-FastSearch daemon."""
+    """Run the VPS-FastSearch daemon."""
     # Set up logging
     logging.basicConfig(
         level=logging.INFO,

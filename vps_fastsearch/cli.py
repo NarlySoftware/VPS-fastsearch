@@ -33,7 +33,7 @@ def cli(ctx, db, config_path):
 
 @cli.group()
 def daemon():
-    """Manage the VPS-VPS-FastSearch daemon."""
+    """Manage the VPS-FastSearch daemon."""
     pass
 
 
@@ -42,7 +42,7 @@ def daemon():
 @click.option("--config", "config_path", default=None, help="Config file path")
 @click.pass_context
 def daemon_start(ctx, detach, config_path):
-    """Start the VPS-VPS-FastSearch daemon."""
+    """Start the VPS-FastSearch daemon."""
     from .daemon import run_daemon, get_daemon_status
     
     config_path = config_path or ctx.obj.get("config_path")
@@ -65,7 +65,7 @@ def daemon_start(ctx, detach, config_path):
 @click.option("--config", "config_path", default=None, help="Config file path")
 @click.pass_context
 def daemon_stop(ctx, config_path):
-    """Stop the VPS-VPS-FastSearch daemon."""
+    """Stop the VPS-FastSearch daemon."""
     from .daemon import stop_daemon
     
     config_path = config_path or ctx.obj.get("config_path")

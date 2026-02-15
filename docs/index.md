@@ -1,4 +1,4 @@
-# VPS-VPS-FastSearch Documentation
+# VPS-FastSearch Documentation
 
 Welcome to the VPS-FastSearch documentation. VPS-FastSearch is a fast hybrid search system combining BM25 full-text search with vector similarity, designed for CPU-only environments.
 

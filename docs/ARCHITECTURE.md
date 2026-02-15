@@ -1,4 +1,4 @@
-# VPS-VPS-FastSearch Architecture
+# VPS-FastSearch Architecture
 
 This document describes the internal architecture of VPS-FastSearch, including component design, data flow, and the hybrid search algorithm.
 

@@ -29,7 +29,7 @@ vectors = embed(["text1", "text2"])
 
 ## VPS-FastSearchClient
 
-The main client class for connecting to the VPS-VPS-FastSearch daemon.
+The main client class for connecting to the VPS-FastSearch daemon.
 
 ### Constructor
 

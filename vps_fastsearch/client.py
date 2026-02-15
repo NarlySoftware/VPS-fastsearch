@@ -21,7 +21,7 @@ class DaemonNotRunningError(FastSearchError):
 
 class FastSearchClient:
     """
-    Python client for VPS-VPS-FastSearch daemon.
+    Python client for VPS-FastSearch daemon.
     
     Usage:
         from vps_fastsearch import FastSearchClient

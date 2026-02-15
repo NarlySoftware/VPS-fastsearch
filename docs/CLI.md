@@ -271,7 +271,7 @@ Deleted 8 chunks from /path/to/README.md
 
 ## daemon
 
-Manage the VPS-VPS-FastSearch daemon server.
+Manage the VPS-FastSearch daemon server.
 
 ### daemon start
 
