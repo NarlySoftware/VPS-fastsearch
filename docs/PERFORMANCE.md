@@ -47,6 +47,58 @@ Tested on Apple M2 (MacBook Air, 8GB RAM) with 1000 document chunks (~500 tokens
 
 ---
 
+## Real-World VPS Benchmark
+
+Tested on a production 8GB VPS (AMD EPYC, no GPU), Python 3.13, 15 documents.
+
+### Memory Progression
+
+| State | RSS | Delta |
+|-------|-----|-------|
+| Python baseline | 12.6 MB | — |
+| After loading embedder | 477.6 MB | +465 MB |
+| After indexing 15 docs | 482.6 MB | +5 MB |
+| After all searches | 485.7 MB | +8 MB |
+
+**Key finding:** The embedder model is the dominant cost (~465 MB). On an 8GB box starting at 1.9GB used, it bumps to ~2.4GB — still leaves 5.4GB available (31% usage). Totally manageable.
+
+### Search Latency (Warm Model)
+
+| Method | Latency |
+|--------|---------|
+| BM25 only | 0.3-0.5ms |
+| Vector only | 1.2-3.1ms |
+| Hybrid (BM25+Vector RRF) | 1.3-1.6ms |
+
+### Semantic Accuracy
+
+Query: *"How do I access the dashboard?"*
+
+| Method | Top Result | Correct? |
+|--------|------------|----------|
+| BM25 | SSH tunnel docs (keyword overlap) | ❌ |
+| Vector | Dashboard setup guide | ✅ |
+| Hybrid | Dashboard setup guide | ✅ |
+
+**Takeaway:** Vector search catches what BM25 misses. Hybrid gets the best of both.
+
+### Environment Details
+
+- **Model:** FastEmbed default (BAAI/bge-small-en-v1.5, ~33M params)
+- **Backend:** ONNX Runtime on CPU
+- **Storage:** SQLite + sqlite-vec
+- **DB size:** 3 MB for 15 docs
+- **Cold start:** ~11s (model download cached after first run)
+
+### Daemon vs No Daemon
+
+| Mode | Memory Cost | Search Latency |
+|------|-------------|----------------|
+| Without daemon | 465MB + 11s cold start *per process* | Variable |
+| With daemon | 465MB once | 1-2ms over Unix socket |
+
+---
+
 ## Speed Comparison
 
 ### Query Modes
