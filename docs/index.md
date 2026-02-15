@@ -14,6 +14,7 @@ Welcome to the VPS-FastSearch documentation. VPS-FastSearch is a fast hybrid sea
 | [Deployment](DEPLOYMENT.md) | Production setup and systemd |
 | [Performance](PERFORMANCE.md) | Benchmarks and optimization tips |
 | [Integration](INTEGRATION.md) | Using with OpenClaw/Clawdbot |
+| [OpenClaw Guide](OpenClaw-Integration.md) | Step-by-step OpenClaw setup with QMD wrapper |
 | [Troubleshooting](TROUBLESHOOTING.md) | Common issues and solutions |
 
 ## Getting Started
@@ -77,4 +78,4 @@ The daemon keeps ML models loaded in memory, reducing search latency from ~800ms
 
 ## Version
 
-Current version: **0.2.0**
+Current version: **0.2.1**
