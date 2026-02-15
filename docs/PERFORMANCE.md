@@ -47,9 +47,22 @@ Tested on Apple M2 (MacBook Air, 8GB RAM) with 1000 document chunks (~500 tokens
 
 ---
 
+## Tested Hardware
+
+VPS-FastSearch is tested on real Hostinger KVM VPS instances — the kind of affordable hardware it's designed for.
+
+| Plan | vCPU | RAM | Storage | Price | Status |
+|------|------|-----|---------|-------|--------|
+| **Hostinger KVM 2** | 2 cores | 8 GB | 100 GB NVMe | ~$7/mo | ✅ Tested |
+| **Hostinger KVM 4** | 4 cores | 16 GB | 200 GB NVMe | ~$10/mo | ✅ Tested |
+
+**No GPU required.** These are CPU-only VPS instances running ONNX inference.
+
+---
+
 ## Real-World VPS Benchmark
 
-Tested on a production 8GB VPS (AMD EPYC, no GPU), Python 3.13, 15 documents.
+Tested on Hostinger KVM 2 (8GB RAM, 2 vCPU), Python 3.13, 15 documents.
 
 ### Memory Progression
 

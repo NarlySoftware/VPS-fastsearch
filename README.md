@@ -54,6 +54,17 @@ Choose your model based on available RAM:
 
 The smaller model (bge-small) still delivers excellent results for most use cases — semantic search that understands meaning, not just keywords.
 
+### Tested Hardware
+
+VPS-FastSearch is tested on real budget VPS instances — the kind of hardware it's designed for:
+
+| Provider | Plan | vCPU | RAM | Price | Result |
+|----------|------|------|-----|-------|--------|
+| Hostinger | KVM 2 | 2 | 8 GB | ~$7/mo | ✅ 485MB used, 1.3ms hybrid search |
+| Hostinger | KVM 4 | 4 | 16 GB | ~$10/mo | ✅ Plenty of headroom |
+
+No GPU. No expensive cloud instances. Just affordable VPS hardware running semantic search.
+
 ### Real-World Example
 
 ```python
