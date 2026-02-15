@@ -269,6 +269,11 @@ class SearchDB:
         
         Returns list of results with id, source, content, score, rank.
         """
+        # Sanitize query for FTS5 - hyphens are parsed as column operators
+        import re
+        tokens = re.findall(r'\w+', query)
+        fts_query = ' OR '.join(f'"{t}"' for t in tokens) if tokens else '""'
+        
         cursor = self._execute(
             """
             SELECT 
@@ -284,7 +289,7 @@ class SearchDB:
             ORDER BY score
             LIMIT ?
             """,
-            (query, limit),
+            (fts_query, limit),
         )
         
         results = []

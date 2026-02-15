@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2025-02-15
+
+### Fixed
+- **Memory optimization**: Limit ONNX Runtime threads to 2 during model load, reducing memory from 4GB to 483MB
+- **FTS5 query crash**: Sanitize search queries containing hyphens (e.g., "node-llama-cpp") that were parsed as column operators
+
 ## [0.2.0] - 2025-02-15
 
 ### Added

@@ -77,7 +77,8 @@ class ModelManager:
         
         if slot == "embedder":
             from fastembed import TextEmbedding
-            instance = TextEmbedding(model_config.name)
+            # Limit threads to prevent ONNX arena memory bloat (4GB → 483MB)
+            instance = TextEmbedding(model_config.name, threads=2)
         elif slot == "reranker":
             from sentence_transformers import CrossEncoder
             instance = CrossEncoder(model_config.name)
