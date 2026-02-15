@@ -27,7 +27,7 @@ This document describes the internal architecture of FastSearch, including compo
 │                                  │   ┌─────────────────────────┐   │   │
 │                                  │   │   Unix Socket Server    │   │   │
 │                                  │   │   JSON-RPC 2.0 over     │   │   │
-│                                  │   │   /tmp/fastsearch.sock  │   │   │
+│                                  │   │   /tmp/vps_fastsearch.sock  │   │   │
 │                                  │   └─────────────────────────┘   │   │
 │                                  └─────────────────────────────────┘   │
 │                                              │                         │
@@ -149,7 +149,7 @@ The `FastSearchDaemon` class provides a Unix socket server with JSON-RPC 2.0 pro
 
 **Components:**
 - **ModelManager** — LRU cache for models with memory budget
-- **Unix Socket Server** — Async server at `/tmp/fastsearch.sock`
+- **Unix Socket Server** — Async server at `/tmp/vps_fastsearch.sock`
 - **Request Handler** — JSON-RPC 2.0 method dispatch
 
 **Model lifecycle:**

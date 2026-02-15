@@ -24,7 +24,7 @@ class FastSearchClient:
     Python client for FastSearch daemon.
     
     Usage:
-        from fastsearch import FastSearchClient
+        from vps_fastsearch import FastSearchClient
         
         client = FastSearchClient()
         results = client.search("query")

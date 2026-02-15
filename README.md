@@ -1,4 +1,4 @@
-# FastSearch
+# VPS-FastSearch
 
 **Fast hybrid search for CPU-only VPS using ONNX Runtime.**
 
@@ -57,7 +57,7 @@ The smaller model (bge-small) still delivers excellent results for most use case
 ### Real-World Example
 
 ```python
-from fastsearch import search
+from vps_fastsearch import search
 
 # AI assistant searching its memory before responding
 relevant_context = search("user's preferred communication style", limit=5)
@@ -76,10 +76,10 @@ No API keys. No GPU. No waiting. Just fast, local semantic search.
 
 ```bash
 # Basic installation
-pip install fastsearch
+pip install vps-fastsearch
 
 # With reranking support
-pip install "fastsearch[rerank]"
+pip install "vps-fastsearch[rerank]"
 
 # From source
 git clone https://github.com/your-username/fastsearch
@@ -91,49 +91,49 @@ pip install -e ".[all]"
 
 ```bash
 # Index a file
-fastsearch index README.md
+vps-fastsearch index README.md
 
 # Index a directory
-fastsearch index ./docs --glob "*.md"
+vps-fastsearch index ./docs --glob "*.md"
 
 # Re-index (replace existing)
-fastsearch index ./docs --reindex
+vps-fastsearch index ./docs --reindex
 ```
 
 ### Search
 
 ```bash
 # Hybrid search (default)
-fastsearch search "how to configure"
+vps-fastsearch search "how to configure"
 
 # With reranking (more accurate)
-fastsearch search "complex query" --rerank
+vps-fastsearch search "complex query" --rerank
 
 # Specific mode
-fastsearch search "exact phrase" --mode bm25
-fastsearch search "semantic meaning" --mode vector
+vps-fastsearch search "exact phrase" --mode bm25
+vps-fastsearch search "semantic meaning" --mode vector
 ```
 
 ### Start the Daemon (Recommended)
 
 ```bash
 # Start daemon (keeps models in memory)
-fastsearch daemon start --detach
+vps-fastsearch daemon start --detach
 
 # Now searches are instant (~5ms vs ~800ms cold start)
-fastsearch search "fast query"
+vps-fastsearch search "fast query"
 
 # Check status
-fastsearch daemon status
+vps-fastsearch daemon status
 
 # Stop
-fastsearch daemon stop
+vps-fastsearch daemon stop
 ```
 
 ## Python API
 
 ```python
-from fastsearch import FastSearchClient
+from vps_fastsearch import FastSearchClient
 
 # Connect to daemon
 with FastSearchClient() as client:
@@ -153,7 +153,7 @@ with FastSearchClient() as client:
 ### Quick Functions
 
 ```python
-from fastsearch import search, embed
+from vps_fastsearch import search, embed
 
 # Uses daemon if available, falls back to direct
 results = search("query")

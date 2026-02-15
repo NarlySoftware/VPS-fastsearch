@@ -1,6 +1,6 @@
 # Use Cases
 
-Real-world examples of FastSearch in action.
+Real-world examples of VPS-FastSearch in action.
 
 ---
 
@@ -21,7 +21,7 @@ API-based embeddings add 200-500ms latency per search. On a budget VPS, you can'
 ### The Solution
 
 ```python
-from fastsearch import search
+from vps_fastsearch import search
 
 def get_relevant_context(user_query: str) -> list[str]:
     """Search assistant memory before responding."""
@@ -37,11 +37,11 @@ context = get_relevant_context("What's the user's preferred tone?")
 
 ```bash
 # Index your memory/knowledge files
-fastsearch index ~/assistant/memories --glob "*.md"
-fastsearch index ~/assistant/docs --glob "*.txt"
+vps-fastsearch index ~/assistant/memories --glob "*.md"
+vps-fastsearch index ~/assistant/docs --glob "*.txt"
 
 # Start daemon for instant searches
-fastsearch daemon start --detach
+vps-fastsearch daemon start --detach
 ```
 
 ---
@@ -51,9 +51,9 @@ fastsearch daemon start --detach
 Build a local search engine for your docs.
 
 ```python
-from fastsearch import FastSearchClient
+from vps_fastsearch import VPS-FastSearchClient
 
-client = FastSearchClient()
+client = VPS-FastSearchClient()
 
 def search_docs(query: str):
     results = client.search(query, limit=10, rerank=True)
@@ -75,11 +75,11 @@ Search through code comments and docstrings.
 
 ```bash
 # Index Python files
-fastsearch index ./src --glob "*.py"
+vps-fastsearch index ./src --glob "*.py"
 
 # Search for functionality
-fastsearch search "parse JSON response"
-fastsearch search "handle database connection errors"
+vps-fastsearch search "parse JSON response"
+vps-fastsearch search "handle database connection errors"
 ```
 
 ---
@@ -91,7 +91,7 @@ Add semantic search to your notes.
 ```python
 import os
 from pathlib import Path
-from fastsearch import SearchDB, get_embedder, chunk_text
+from vps_fastsearch import SearchDB, get_embedder, chunk_text
 
 def index_notes(notes_dir: str, db_path: str = "notes.db"):
     """Index all markdown notes."""
@@ -129,11 +129,11 @@ Search through application logs semantically.
 
 ```bash
 # Index recent logs
-fastsearch index /var/log/myapp --glob "*.log"
+vps-fastsearch index /var/log/myapp --glob "*.log"
 
 # Find relevant errors
-fastsearch search "connection timeout database" --mode hybrid
-fastsearch search "memory allocation failed" --limit 20
+vps-fastsearch search "connection timeout database" --mode hybrid
+vps-fastsearch search "memory allocation failed" --limit 20
 ```
 
 ---
@@ -143,7 +143,7 @@ fastsearch search "memory allocation failed" --limit 20
 Search through exported chat histories (Slack, Discord, etc.).
 
 ```python
-from fastsearch import search
+from vps_fastsearch import search
 
 # After indexing exported chat JSON/text files
 results = search("discussion about deployment strategy")

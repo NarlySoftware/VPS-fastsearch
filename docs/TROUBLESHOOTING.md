@@ -6,10 +6,10 @@ Common issues and their solutions.
 
 ```bash
 # Check daemon status
-fastsearch daemon status
+vps-fastsearch daemon status
 
 # Check socket exists
-ls -la /tmp/fastsearch.sock
+ls -la /tmp/vps_fastsearch.sock
 
 # Check PID file
 cat /tmp/fastsearch.pid
@@ -18,7 +18,7 @@ cat /tmp/fastsearch.pid
 fastsearch stats
 
 # Test search
-fastsearch search "test" --json
+vps-fastsearch search "test" --json
 ```
 
 ---
@@ -27,18 +27,18 @@ fastsearch search "test" --json
 
 ### Daemon Won't Start
 
-**Symptom:** `fastsearch daemon start` hangs or fails.
+**Symptom:** `vps-fastsearch daemon start` hangs or fails.
 
 **Solutions:**
 
 1. **Stale socket file**
    ```bash
    # Remove stale socket
-   rm /tmp/fastsearch.sock
+   rm /tmp/vps_fastsearch.sock
    rm /tmp/fastsearch.pid
    
    # Try again
-   fastsearch daemon start
+   vps-fastsearch daemon start
    ```
 
 2. **Process already running**
@@ -50,16 +50,16 @@ fastsearch search "test" --json
    kill $(cat /tmp/fastsearch.pid)
    
    # Or force kill
-   pkill -f "fastsearch daemon"
+   pkill -f "vps-fastsearch daemon"
    ```
 
 3. **Port/socket permission denied**
    ```bash
    # Check ownership
-   ls -la /tmp/fastsearch.sock
+   ls -la /tmp/vps_fastsearch.sock
    
    # If owned by another user, remove or change socket path
-   rm /tmp/fastsearch.sock
+   rm /tmp/vps_fastsearch.sock
    
    # Or use different path in config
    # daemon.socket_path: /tmp/fastsearch-$(whoami).sock
@@ -83,7 +83,7 @@ fastsearch search "test" --json
    journalctl -u fastsearch -n 100
    
    # Run in foreground to see errors
-   fastsearch daemon start  # Without --detach
+   vps-fastsearch daemon start  # Without --detach
    ```
 
 2. **Out of memory**
@@ -101,7 +101,7 @@ fastsearch search "test" --json
    rm -rf ~/.cache/huggingface/hub/models--BAAI*
    
    # Try starting again
-   fastsearch daemon start
+   vps-fastsearch daemon start
    ```
 
 ---
@@ -116,7 +116,7 @@ fastsearch search "test" --json
 
 1. **Start the daemon**
    ```bash
-   fastsearch daemon start --detach
+   vps-fastsearch daemon start --detach
    ```
 
 2. **Check socket path**
@@ -125,14 +125,14 @@ fastsearch search "test" --json
    fastsearch config show | grep socket_path
    
    # Verify socket exists
-   ls -la /tmp/fastsearch.sock
+   ls -la /tmp/vps_fastsearch.sock
    ```
 
 3. **Config mismatch**
    ```bash
    # Ensure client and daemon use same config
-   FASTSEARCH_CONFIG=/path/to/config.yaml fastsearch daemon start --detach
-   FASTSEARCH_CONFIG=/path/to/config.yaml fastsearch search "test"
+   FASTSEARCH_CONFIG=/path/to/config.yaml vps-fastsearch daemon start --detach
+   FASTSEARCH_CONFIG=/path/to/config.yaml vps-fastsearch search "test"
    ```
 
 ### "Connection refused"
@@ -144,17 +144,17 @@ fastsearch search "test" --json
 1. **Daemon crashed**
    ```bash
    # Check status
-   fastsearch daemon status
+   vps-fastsearch daemon status
    
    # Restart
-   fastsearch daemon stop
-   fastsearch daemon start --detach
+   vps-fastsearch daemon stop
+   vps-fastsearch daemon start --detach
    ```
 
 2. **Socket permissions**
    ```bash
    # Check permissions
-   ls -la /tmp/fastsearch.sock
+   ls -la /tmp/vps_fastsearch.sock
    # Should be: srw------- (600)
    
    # If wrong user, restart daemon as correct user
@@ -169,18 +169,18 @@ fastsearch search "test" --json
 1. **Daemon overloaded**
    ```bash
    # Check status
-   fastsearch daemon status
+   vps-fastsearch daemon status
    
    # Restart daemon
-   fastsearch daemon stop
-   fastsearch daemon start --detach
+   vps-fastsearch daemon stop
+   vps-fastsearch daemon start --detach
    ```
 
 2. **Model loading**
    ```bash
    # First query after start loads model (~10s)
    # Pre-warm with dummy query
-   fastsearch search "warmup" > /dev/null
+   vps-fastsearch search "warmup" > /dev/null
    ```
 
 3. **Increase timeout**
@@ -204,8 +204,8 @@ fastsearch search "test" --json
    rm -rf ~/.cache/huggingface/
    
    # Restart daemon
-   fastsearch daemon stop
-   fastsearch daemon start --detach
+   vps-fastsearch daemon stop
+   vps-fastsearch daemon start --detach
    ```
 
 2. **Network issues**
@@ -284,7 +284,7 @@ fastsearch search "test" --json
 
 1. **Check what's loaded**
    ```bash
-   fastsearch daemon status
+   vps-fastsearch daemon status
    # Shows loaded models and memory
    ```
 
@@ -305,7 +305,7 @@ fastsearch search "test" --json
 4. **Force garbage collection**
    ```bash
    # Reload config triggers cleanup
-   fastsearch daemon reload
+   vps-fastsearch daemon reload
    ```
 
 ### Memory Leak
@@ -323,7 +323,7 @@ fastsearch search "test" --json
 2. **Monitor memory**
    ```bash
    # Watch memory usage
-   watch -n 5 'fastsearch daemon status --json | jq .total_memory_mb'
+   watch -n 5 'vps-fastsearch daemon status --json | jq .total_memory_mb'
    ```
 
 ---
@@ -344,16 +344,16 @@ fastsearch search "test" --json
 
 2. **Index files first**
    ```bash
-   fastsearch index ./docs --glob "*.md"
+   vps-fastsearch index ./docs --glob "*.md"
    ```
 
 3. **Try different mode**
    ```bash
    # Try BM25 (keyword match)
-   fastsearch search "exact words" --mode bm25
+   vps-fastsearch search "exact words" --mode bm25
    
    # Try vector (semantic)
-   fastsearch search "concept meaning" --mode vector
+   vps-fastsearch search "concept meaning" --mode vector
    ```
 
 4. **Check database path**
@@ -370,18 +370,18 @@ fastsearch search "test" --json
 
 1. **Use reranking**
    ```bash
-   fastsearch search "query" --rerank
+   vps-fastsearch search "query" --rerank
    ```
 
 2. **Try BM25 for keywords**
    ```bash
-   fastsearch search "specific_function_name" --mode bm25
+   vps-fastsearch search "specific_function_name" --mode bm25
    ```
 
 3. **Adjust chunk size**
    ```python
    # Smaller chunks may help
-   from fastsearch import chunk_text
+   from vps_fastsearch import chunk_text
    chunks = list(chunk_text(content, target_chars=1000))
    ```
 
@@ -393,23 +393,23 @@ fastsearch search "test" --json
 
 1. **Use daemon mode**
    ```bash
-   fastsearch daemon start --detach
+   vps-fastsearch daemon start --detach
    # First search loads model, subsequent are fast
    ```
 
 2. **Skip reranking**
    ```bash
-   fastsearch search "query"  # Without --rerank
+   vps-fastsearch search "query"  # Without --rerank
    ```
 
 3. **Reduce limit**
    ```bash
-   fastsearch search "query" --limit 5  # Instead of 20
+   vps-fastsearch search "query" --limit 5  # Instead of 20
    ```
 
 4. **Use BM25 for speed**
    ```bash
-   fastsearch search "keyword" --mode bm25  # 2ms vs 4ms
+   vps-fastsearch search "keyword" --mode bm25  # 2ms vs 4ms
    ```
 
 ---
@@ -426,8 +426,8 @@ daemon:
 
 ```bash
 # Restart daemon
-fastsearch daemon stop
-fastsearch daemon start --detach
+vps-fastsearch daemon stop
+vps-fastsearch daemon start --detach
 
 # Watch logs (systemd)
 journalctl -u fastsearch -f
@@ -437,10 +437,10 @@ journalctl -u fastsearch -f
 
 ```bash
 # Use --json for detailed output
-fastsearch search "query" --json | jq .
+vps-fastsearch search "query" --json | jq .
 
 # Check search timings
-fastsearch search "query" --json | jq '.search_time_ms'
+vps-fastsearch search "query" --json | jq '.search_time_ms'
 ```
 
 ### Python Debugging
@@ -449,7 +449,7 @@ fastsearch search "query" --json | jq '.search_time_ms'
 import logging
 logging.basicConfig(level=logging.DEBUG)
 
-from fastsearch import FastSearchClient
+from vps_fastsearch import FastSearchClient
 
 client = FastSearchClient()
 # Now shows connection details
@@ -489,7 +489,7 @@ client = FastSearchClient()
     fastsearch config show
     
     echo "=== Status ==="
-    fastsearch daemon status --json 2>/dev/null || echo "Daemon not running"
+    vps-fastsearch daemon status --json 2>/dev/null || echo "Daemon not running"
     
     echo "=== Database ==="
     fastsearch stats 2>/dev/null || echo "No database"

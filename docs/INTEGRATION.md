@@ -7,7 +7,7 @@ This guide covers integrating FastSearch with other systems, including Python ap
 ### Basic Usage
 
 ```python
-from fastsearch import FastSearchClient, search, embed
+from vps_fastsearch import FastSearchClient, search, embed
 
 # Option 1: Client object (recommended for multiple operations)
 with FastSearchClient() as client:
@@ -22,7 +22,7 @@ vectors = embed(["text"])
 ### Error Handling
 
 ```python
-from fastsearch import (
+from vps_fastsearch import (
     FastSearchClient,
     DaemonNotRunningError,
     FastSearchError
@@ -36,8 +36,8 @@ def search_with_fallback(query: str) -> list:
             return result["results"]
     except DaemonNotRunningError:
         # Fall back to direct mode
-        from fastsearch import SearchDB, Embedder
-        db = SearchDB("fastsearch.db")
+        from vps_fastsearch import SearchDB, Embedder
+        db = SearchDB("vps_fastsearch.db")
         embedder = Embedder()
         embedding = embedder.embed_single(query)
         results = db.search_hybrid(query, embedding)
@@ -55,7 +55,7 @@ FastSearch uses blocking I/O. For async applications, use a thread executor:
 ```python
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from fastsearch import FastSearchClient
+from vps_fastsearch import FastSearchClient
 
 executor = ThreadPoolExecutor(max_workers=4)
 
@@ -79,7 +79,7 @@ async def main():
 
 ```python
 from flask import Flask, request, jsonify
-from fastsearch import FastSearchClient, DaemonNotRunningError
+from vps_fastsearch import FastSearchClient, DaemonNotRunningError
 
 app = Flask(__name__)
 
@@ -108,7 +108,7 @@ if __name__ == "__main__":
 ```python
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
-from fastsearch import FastSearchClient, DaemonNotRunningError
+from vps_fastsearch import FastSearchClient, DaemonNotRunningError
 from typing import List, Optional
 
 app = FastAPI()
@@ -167,14 +167,14 @@ FastSearch integrates seamlessly with Clawdbot for semantic search over memory f
 
 ```bash
 # Install FastSearch in Clawdbot environment
-pip install fastsearch[rerank]
+pip install vps-fastsearch[rerank]
 
 # Index Clawdbot workspace
 cd ~/clawd
-fastsearch index . --glob "**/*.md" --db ~/.clawdbot/search.db
+vps-fastsearch index . --glob "**/*.md" --db ~/.clawdbot/search.db
 
 # Start daemon
-fastsearch daemon start --detach
+vps-fastsearch daemon start --detach
 ```
 
 ### Clawdbot Tool Configuration
@@ -185,12 +185,12 @@ Add to Clawdbot's TOOLS.md:
 ### FastSearch
 
 - **Database:** ~/.clawdbot/search.db
-- **Socket:** /tmp/fastsearch.sock
+- **Socket:** /tmp/vps_fastsearch.sock
 
 **Commands:**
-- Search: `fastsearch search "query" --limit 5`
-- Index new files: `fastsearch index /path/to/file.md`
-- Check status: `fastsearch daemon status`
+- Search: `vps-fastsearch search "query" --limit 5`
+- Index new files: `vps-fastsearch index /path/to/file.md`
+- Check status: `vps-fastsearch daemon status`
 ```
 
 ### Search Memory Files
@@ -200,7 +200,7 @@ Add to Clawdbot's TOOLS.md:
 """Search Clawdbot memory files."""
 
 from pathlib import Path
-from fastsearch import FastSearchClient
+from vps_fastsearch import FastSearchClient
 
 def search_memory(query: str, limit: int = 5):
     """Search Clawdbot memory files."""
@@ -229,7 +229,7 @@ for r in results:
 """Index new content into Clawdbot's search database."""
 
 from pathlib import Path
-from fastsearch import SearchDB, FastSearchClient, chunk_markdown
+from vps_fastsearch import SearchDB, FastSearchClient, chunk_markdown
 
 def index_file(file_path: str):
     """Index a file into the search database."""
@@ -291,7 +291,7 @@ FastSearch daemon uses JSON-RPC 2.0 over a Unix socket with length-prefixed fram
     "method": "search",
     "params": {
         "query": "example query",
-        "db_path": "fastsearch.db",
+        "db_path": "vps_fastsearch.db",
         "limit": 10,
         "mode": "hybrid",
         "rerank": false
@@ -353,7 +353,7 @@ FastSearch daemon uses JSON-RPC 2.0 over a Unix socket with length-prefixed fram
 #!/bin/bash
 # fastsearch-search.sh - Simple bash client
 
-SOCKET="/tmp/fastsearch.sock"
+SOCKET="/tmp/vps_fastsearch.sock"
 QUERY="$1"
 
 # Build JSON-RPC request
@@ -379,7 +379,7 @@ const net = require('net');
 const path = require('path');
 
 class FastSearchClient {
-    constructor(socketPath = '/tmp/fastsearch.sock') {
+    constructor(socketPath = '/tmp/vps_fastsearch.sock') {
         this.socketPath = socketPath;
     }
 
@@ -482,7 +482,7 @@ type RPCError struct {
 
 func NewClient(socketPath string) *Client {
     if socketPath == "" {
-        socketPath = "/tmp/fastsearch.sock"
+        socketPath = "/tmp/vps_fastsearch.sock"
     }
     return &Client{socketPath: socketPath}
 }
@@ -547,7 +547,7 @@ func (c *Client) Search(query string, limit int) (json.RawMessage, error) {
 """Index with webhook notification."""
 
 import requests
-from fastsearch import FastSearchClient, chunk_markdown
+from vps_fastsearch import FastSearchClient, chunk_markdown
 from pathlib import Path
 
 WEBHOOK_URL = "https://your-app.com/webhooks/fastsearch"
@@ -580,7 +580,7 @@ def index_with_webhook(file_path: str):
 
 import json
 from datetime import datetime
-from fastsearch import FastSearchClient
+from vps_fastsearch import FastSearchClient
 
 def search_with_logging(query: str, **kwargs):
     """Search with event logging."""
@@ -618,7 +618,7 @@ spec:
         command:
         - /bin/sh
         - -c
-        - "fastsearch daemon status --json | jq -e '.uptime_seconds > 0'"
+        - "vps-fastsearch daemon status --json | jq -e '.uptime_seconds > 0'"
       initialDelaySeconds: 30
       periodSeconds: 10
 ```
@@ -630,7 +630,7 @@ spec:
 """Export FastSearch metrics for Prometheus."""
 
 from prometheus_client import start_http_server, Gauge
-from fastsearch import FastSearchClient
+from vps_fastsearch import FastSearchClient
 import time
 
 # Define metrics

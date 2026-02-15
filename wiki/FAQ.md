@@ -2,17 +2,17 @@
 
 ## General
 
-### What makes FastSearch different from other search libraries?
+### What makes VPS-FastSearch different from other search libraries?
 
-FastSearch is optimized for **CPU-only environments** with **daemon mode** that keeps models loaded. Most alternatives either require GPU, use expensive API calls, or have slow cold-start times. FastSearch gives you 4ms searches on a $5 VPS.
+VPS-FastSearch is optimized for **CPU-only environments** with **daemon mode** that keeps models loaded. Most alternatives either require GPU, use expensive API calls, or have slow cold-start times. VPS-FastSearch gives you 4ms searches on a $5 VPS.
 
 ### Do I need a GPU?
 
-No. FastSearch uses ONNX Runtime optimized for CPU inference. It runs efficiently on any modern x86 or ARM processor.
+No. VPS-FastSearch uses ONNX Runtime optimized for CPU inference. It runs efficiently on any modern x86 or ARM processor.
 
 ### What embedding model does it use?
 
-By default, FastSearch uses [BGE (BAAI General Embedding)](https://huggingface.co/BAAI/bge-base-en-v1.5) models via FastEmbed:
+By default, VPS-FastSearch uses [BGE (BAAI General Embedding)](https://huggingface.co/BAAI/bge-base-en-v1.5) models via FastEmbed:
 - `bge-small-en-v1.5` — 384 dimensions, ~130MB
 - `bge-base-en-v1.5` — 768 dimensions, ~450MB (default)
 - `bge-large-en-v1.5` — 1024 dimensions, ~1.2GB
@@ -34,7 +34,7 @@ Results are merged using Reciprocal Rank Fusion (RRF) for best of both worlds.
 The first search loads the embedding model into memory (~600-800ms). Use daemon mode to keep models loaded:
 
 ```bash
-fastsearch daemon start --detach
+vps-fastsearch daemon start --detach
 ```
 
 ### How much RAM do I need?
@@ -47,7 +47,7 @@ fastsearch daemon start --detach
 
 ### How many documents can it handle?
 
-FastSearch scales well:
+VPS-FastSearch scales well:
 - 1K chunks: <5ms search
 - 10K chunks: <10ms search
 - 100K chunks: <20ms search
@@ -62,7 +62,7 @@ FastSearch scales well:
 Re-index with the `--reindex` flag:
 
 ```bash
-fastsearch index ./docs --reindex
+vps-fastsearch index ./docs --reindex
 ```
 
 This replaces existing chunks from those files.
@@ -72,15 +72,15 @@ This replaces existing chunks from those files.
 Yes, specify `--db` with any command:
 
 ```bash
-fastsearch index ./notes --db notes.db
-fastsearch index ./code --db code.db
-fastsearch search "query" --db notes.db
+vps-fastsearch index ./notes --db notes.db
+vps-fastsearch index ./code --db code.db
+vps-fastsearch search "query" --db notes.db
 ```
 
 ### How do I search from Python without the daemon?
 
 ```python
-from fastsearch import SearchDB, get_embedder
+from vps_fastsearch import SearchDB, get_embedder
 
 db = SearchDB("fastsearch.db")
 embedder = get_embedder()
@@ -117,14 +117,14 @@ Or use your system's process manager (supervisord, launchd, etc.).
 ### How do I check if the daemon is running?
 
 ```bash
-fastsearch daemon status
+vps-fastsearch daemon status
 ```
 
 ### The daemon won't start. What do I check?
 
 1. Check if socket exists: `ls -la /tmp/fastsearch.sock`
-2. Check logs: `fastsearch daemon logs`
-3. Try foreground mode: `fastsearch daemon start` (without `--detach`)
+2. Check logs: `vps-fastsearch daemon logs`
+3. Try foreground mode: `vps-fastsearch daemon start` (without `--detach`)
 4. Check memory: daemon needs ~500MB free
 
 ---
@@ -136,7 +136,7 @@ fastsearch daemon status
 The daemon isn't running. Start it:
 
 ```bash
-fastsearch daemon start --detach
+vps-fastsearch daemon start --detach
 ```
 
 ### "Out of memory" errors

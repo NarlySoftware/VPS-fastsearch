@@ -4,12 +4,12 @@ FastSearch uses a YAML configuration file for all settings.
 
 ## Config File Location
 
-Default path: `~/.config/fastsearch/config.yaml`
+Default path: `~/.config/vps_fastsearch/config.yaml`
 
 **Priority order:**
 1. Explicit path via `--config` flag
 2. `FASTSEARCH_CONFIG` environment variable
-3. `~/.config/fastsearch/config.yaml`
+3. `~/.config/vps_fastsearch/config.yaml`
 4. Built-in defaults
 
 ## Quick Setup
@@ -31,15 +31,15 @@ fastsearch config path
 
 ```yaml
 # FastSearch Configuration
-# ~/.config/fastsearch/config.yaml
+# ~/.config/vps_fastsearch/config.yaml
 
 # =============================================================================
 # Daemon Settings
 # =============================================================================
 daemon:
   # Unix socket path for IPC
-  # Default: /tmp/fastsearch.sock
-  socket_path: /tmp/fastsearch.sock
+  # Default: /tmp/vps_fastsearch.sock
+  socket_path: /tmp/vps_fastsearch.sock
   
   # PID file path for process management
   # Default: /tmp/fastsearch.pid
@@ -116,7 +116,7 @@ Controls the daemon server.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `socket_path` | string | `/tmp/fastsearch.sock` | Unix socket path |
+| `socket_path` | string | `/tmp/vps_fastsearch.sock` | Unix socket path |
 | `pid_path` | string | `/tmp/fastsearch.pid` | PID file path |
 | `log_level` | string | `INFO` | Log level: DEBUG, INFO, WARNING, ERROR |
 
@@ -211,8 +211,8 @@ models:
 | `FASTSEARCH_CONFIG` | Config file path |
 
 ```bash
-export FASTSEARCH_DB="/var/lib/fastsearch/main.db"
-export FASTSEARCH_CONFIG="/etc/fastsearch/config.yaml"
+export FASTSEARCH_DB="/var/lib/vps_fastsearch/main.db"
+export FASTSEARCH_CONFIG="/etc/vps_fastsearch/config.yaml"
 ```
 
 ---
@@ -245,8 +245,8 @@ memory:
 ```yaml
 # Standard production config
 daemon:
-  socket_path: /run/fastsearch/fastsearch.sock
-  pid_path: /run/fastsearch/fastsearch.pid
+  socket_path: /run/vps_fastsearch/vps_fastsearch.sock
+  pid_path: /run/vps_fastsearch/fastsearch.pid
   log_level: INFO
 
 models:
@@ -269,7 +269,7 @@ memory:
 ```yaml
 # Maximum quality config
 daemon:
-  socket_path: /tmp/fastsearch.sock
+  socket_path: /tmp/vps_fastsearch.sock
   log_level: INFO
 
 models:
@@ -290,7 +290,7 @@ memory:
 ```yaml
 # Config for small VPS
 daemon:
-  socket_path: /tmp/fastsearch.sock
+  socket_path: /tmp/vps_fastsearch.sock
   log_level: WARNING  # Reduce logging
 
 models:
@@ -312,12 +312,12 @@ memory:
 Run separate instances for different projects:
 
 ```yaml
-# /etc/fastsearch/project-a.yaml
+# /etc/vps_fastsearch/project-a.yaml
 daemon:
   socket_path: /tmp/fastsearch-project-a.sock
   pid_path: /tmp/fastsearch-project-a.pid
 
-# /etc/fastsearch/project-b.yaml
+# /etc/vps_fastsearch/project-b.yaml
 daemon:
   socket_path: /tmp/fastsearch-project-b.sock
   pid_path: /tmp/fastsearch-project-b.pid
@@ -325,11 +325,11 @@ daemon:
 
 ```bash
 # Start separate instances
-fastsearch --config /etc/fastsearch/project-a.yaml daemon start --detach
-fastsearch --config /etc/fastsearch/project-b.yaml daemon start --detach
+fastsearch --config /etc/vps_fastsearch/project-a.yaml daemon start --detach
+fastsearch --config /etc/vps_fastsearch/project-b.yaml daemon start --detach
 
 # Search specific instance
-fastsearch --config /etc/fastsearch/project-a.yaml search "query"
+fastsearch --config /etc/vps_fastsearch/project-a.yaml search "query"
 ```
 
 ---
@@ -359,7 +359,7 @@ fastsearch --config /etc/fastsearch/project-a.yaml search "query"
 Apply config changes without restarting the daemon:
 
 ```bash
-fastsearch daemon reload
+vps-fastsearch daemon reload
 ```
 
 **What can be reloaded:**

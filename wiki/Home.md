@@ -1,17 +1,17 @@
-# Welcome to FastSearch
+# Welcome to VPS-FastSearch
 
-FastSearch is a fast hybrid search library combining BM25 full-text search with vector similarity search. It's designed for CPU-only environments like VPS servers where you need instant semantic search without expensive API calls or GPU hardware.
+VPS-FastSearch is a fast hybrid search library combining BM25 full-text search with vector similarity search. It's designed for CPU-only environments like VPS servers where you need instant semantic search without expensive API calls or GPU hardware.
 
 ## Quick Links
 
 - **[Getting Started](Getting-Started)** — Install and run your first search in 5 minutes
 - **[Use Cases](Use-Cases)** — Real-world examples and integrations
 - **[FAQ](FAQ)** — Common questions answered
-- **[Comparison](Comparison-with-Alternatives)** — How FastSearch stacks up against other solutions
+- **[Comparison](Comparison-with-Alternatives)** — How VPS-FastSearch stacks up against other solutions
 
-## Why FastSearch?
+## Why VPS-FastSearch?
 
-| Feature | FastSearch | OpenAI API | Local Sentence-Transformers |
+| Feature | VPS-FastSearch | OpenAI API | Local Sentence-Transformers |
 |---------|------------|------------|----------------------------|
 | Latency | 4ms | 200-500ms | 800ms+ cold |
 | Cost | Free | Per-query | Free |

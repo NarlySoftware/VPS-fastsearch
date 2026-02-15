@@ -1,0 +1,43 @@
+[Unit]
+Description=FastSearch Memory Daemon
+Documentation=https://github.com/your-username/vps-fastsearch
+After=network.target
+
+[Service]
+Type=simple
+User=vps-fastsearch
+Group=vps-fastsearch
+
+# Main executable
+ExecStart=/usr/local/bin/vps-fastsearch daemon start
+ExecStop=/usr/local/bin/vps-fastsearch daemon stop
+ExecReload=/usr/local/bin/vps-fastsearch daemon reload
+
+# Environment
+Environment="FASTSEARCH_CONFIG=/etc/vps-fastsearch/config.yaml"
+Environment="FASTSEARCH_DB=/var/lib/vps-fastsearch/vps-fastsearch.db"
+
+# Working directory
+WorkingDirectory=/var/lib/vps-fastsearch
+
+# Restart policy
+Restart=always
+RestartSec=5
+
+# Resource limits
+MemoryMax=4G
+MemoryHigh=3G
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/vps-fastsearch /tmp
+
+# Timeout
+TimeoutStartSec=120
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

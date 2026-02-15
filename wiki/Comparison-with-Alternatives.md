@@ -1,10 +1,10 @@
 # Comparison with Alternatives
 
-How does FastSearch compare to other search solutions?
+How does VPS-FastSearch compare to other search solutions?
 
 ## Quick Comparison
 
-| Feature | FastSearch | OpenAI API | ChromaDB | Meilisearch | Elasticsearch |
+| Feature | VPS-FastSearch | OpenAI API | ChromaDB | Meilisearch | Elasticsearch |
 |---------|------------|------------|----------|-------------|---------------|
 | Semantic search | ✅ | ✅ | ✅ | ⚠️ limited | ⚠️ plugin |
 | Keyword search | ✅ BM25 | ❌ | ⚠️ basic | ✅ | ✅ |
@@ -34,7 +34,7 @@ How does FastSearch compare to other search solutions?
 - Requires internet connection
 - Rate limits
 
-**Choose FastSearch when:**
+**Choose VPS-FastSearch when:**
 - You need <10ms latency
 - You're cost-sensitive at scale
 - You want offline capability
@@ -60,7 +60,7 @@ How does FastSearch compare to other search solutions?
 - More complex setup
 - Higher memory usage
 
-**Choose FastSearch when:**
+**Choose VPS-FastSearch when:**
 - You need hybrid (keyword + semantic) search
 - You're on CPU-only hardware
 - You want minimal dependencies
@@ -86,7 +86,7 @@ How does FastSearch compare to other search solutions?
 - Requires running a separate service
 - No native embedding support
 
-**Choose FastSearch when:**
+**Choose VPS-FastSearch when:**
 - You need semantic understanding
 - You want embeddings included
 - You're building AI/LLM applications
@@ -112,7 +112,7 @@ How does FastSearch compare to other search solutions?
 - Semantic search requires plugins
 - Overkill for small datasets
 
-**Choose FastSearch when:**
+**Choose VPS-FastSearch when:**
 - You have <1M documents
 - You want simplicity
 - You're on resource-constrained hardware
@@ -138,7 +138,7 @@ How does FastSearch compare to other search solutions?
 - No built-in BM25
 - DIY everything
 
-**Choose FastSearch when:**
+**Choose VPS-FastSearch when:**
 - You want batteries-included
 - You need daemon mode
 - You want hybrid search out of the box
@@ -151,9 +151,9 @@ How does FastSearch compare to other search solutions?
 
 ---
 
-## Summary: When to Use FastSearch
+## Summary: When to Use VPS-FastSearch
 
-FastSearch is ideal when you need:
+VPS-FastSearch is ideal when you need:
 
 ✅ Fast semantic search on CPU  
 ✅ Hybrid keyword + vector search  

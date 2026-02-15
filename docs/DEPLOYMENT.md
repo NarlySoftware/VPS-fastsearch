@@ -67,7 +67,7 @@ source venv/bin/activate
 
 # Install FastSearch
 pip install --upgrade pip
-pip install "fastsearch[rerank]"
+pip install "vps-fastsearch[rerank]"
 
 # Verify installation
 fastsearch --help
@@ -77,10 +77,10 @@ fastsearch --help
 
 ```bash
 # Create config file
-sudo -u fastsearch tee /etc/fastsearch/config.yaml << 'EOF'
+sudo -u fastsearch tee /etc/vps_fastsearch/config.yaml << 'EOF'
 daemon:
-  socket_path: /run/fastsearch/fastsearch.sock
-  pid_path: /run/fastsearch/fastsearch.pid
+  socket_path: /run/vps_fastsearch/vps_fastsearch.sock
+  pid_path: /run/vps_fastsearch/fastsearch.pid
   log_level: INFO
 
 models:
@@ -119,14 +119,14 @@ User=fastsearch
 Group=fastsearch
 
 # Environment
-Environment=FASTSEARCH_CONFIG=/etc/fastsearch/config.yaml
-Environment=FASTSEARCH_DB=/var/lib/fastsearch/main.db
+Environment=FASTSEARCH_CONFIG=/etc/vps_fastsearch/config.yaml
+Environment=FASTSEARCH_DB=/var/lib/vps_fastsearch/main.db
 
 # Working directory
 WorkingDirectory=/var/lib/fastsearch
 
 # Command
-ExecStart=/opt/fastsearch/venv/bin/fastsearch daemon start
+ExecStart=/opt/vps_fastsearch/venv/bin/vps-fastsearch daemon start
 ExecReload=/bin/kill -HUP $MAINPID
 
 # Restart policy
@@ -199,7 +199,7 @@ Models are downloaded on first use. For faster deployments, pre-download:
 
 ```bash
 sudo -u fastsearch -i
-source /opt/fastsearch/venv/bin/activate
+source /opt/vps_fastsearch/venv/bin/activate
 
 # Pre-download embedder
 python3 -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-base-en-v1.5')"
@@ -217,18 +217,18 @@ python3 -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-
 | Log | Location |
 |-----|----------|
 | Service logs | `journalctl -u fastsearch` |
-| Application logs | `/var/log/fastsearch/` (if configured) |
+| Application logs | `/var/log/vps_fastsearch/` (if configured) |
 
 ### Monitoring Script
 
-Create `/opt/fastsearch/monitor.sh`:
+Create `/opt/vps_fastsearch/monitor.sh`:
 
 ```bash
 #!/bin/bash
 # FastSearch monitoring script
 
-SOCKET="/run/fastsearch/fastsearch.sock"
-CONFIG="/etc/fastsearch/config.yaml"
+SOCKET="/run/vps_fastsearch/vps_fastsearch.sock"
+CONFIG="/etc/vps_fastsearch/config.yaml"
 
 # Check if socket exists
 if [ ! -S "$SOCKET" ]; then
@@ -237,7 +237,7 @@ if [ ! -S "$SOCKET" ]; then
 fi
 
 # Get status via CLI
-STATUS=$(/opt/fastsearch/venv/bin/fastsearch --config "$CONFIG" daemon status --json 2>/dev/null)
+STATUS=$(/opt/vps_fastsearch/venv/bin/fastsearch --config "$CONFIG" daemon status --json 2>/dev/null)
 
 if [ $? -ne 0 ]; then
     echo "CRITICAL: Daemon not responding"
@@ -262,7 +262,7 @@ For load balancers, create a simple HTTP wrapper:
 """Simple HTTP health check for FastSearch."""
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from fastsearch import FastSearchClient
+from vps_fastsearch import FastSearchClient
 import json
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -324,11 +324,11 @@ sudo ufw allow from 127.0.0.1 to any port 8080
 
 ```bash
 # Config file (contains no secrets, but restrict anyway)
-sudo chmod 640 /etc/fastsearch/config.yaml
-sudo chown root:fastsearch /etc/fastsearch/config.yaml
+sudo chmod 640 /etc/vps_fastsearch/config.yaml
+sudo chown root:fastsearch /etc/vps_fastsearch/config.yaml
 
 # Database files
-sudo chmod 600 /var/lib/fastsearch/*.db
+sudo chmod 600 /var/lib/vps_fastsearch/*.db
 ```
 
 ---
@@ -339,10 +339,10 @@ sudo chmod 600 /var/lib/fastsearch/*.db
 
 ```bash
 #!/bin/bash
-# /opt/fastsearch/backup.sh
+# /opt/vps_fastsearch/backup.sh
 
 BACKUP_DIR="/var/backups/fastsearch"
-DB_PATH="/var/lib/fastsearch/main.db"
+DB_PATH="/var/lib/vps_fastsearch/main.db"
 DATE=$(date +%Y%m%d_%H%M%S)
 
 mkdir -p "$BACKUP_DIR"
@@ -360,7 +360,7 @@ find "$BACKUP_DIR" -name "*.gz" -mtime +7 -delete
 Add to cron:
 ```bash
 # Daily backup at 2 AM
-0 2 * * * /opt/fastsearch/backup.sh
+0 2 * * * /opt/vps_fastsearch/backup.sh
 ```
 
 ### Restore
@@ -370,8 +370,8 @@ Add to cron:
 sudo systemctl stop fastsearch
 
 # Restore
-gunzip -c /var/backups/fastsearch/fastsearch_20240115_020000.db.gz > /var/lib/fastsearch/main.db
-chown fastsearch:fastsearch /var/lib/fastsearch/main.db
+gunzip -c /var/backups/vps_fastsearch/fastsearch_20240115_020000.db.gz > /var/lib/vps_fastsearch/main.db
+chown fastsearch:fastsearch /var/lib/vps_fastsearch/main.db
 
 # Start service
 sudo systemctl start fastsearch
@@ -387,12 +387,12 @@ For large deployments, split by domain:
 
 ```bash
 # Separate databases
-/var/lib/fastsearch/docs.db      # Documentation
-/var/lib/fastsearch/code.db      # Code files
-/var/lib/fastsearch/support.db   # Support tickets
+/var/lib/vps_fastsearch/docs.db      # Documentation
+/var/lib/vps_fastsearch/code.db      # Code files
+/var/lib/vps_fastsearch/support.db   # Support tickets
 
 # Search specific database
-fastsearch --db /var/lib/fastsearch/docs.db search "query"
+fastsearch --db /var/lib/vps_fastsearch/docs.db search "query"
 ```
 
 ### Multiple Instances
@@ -401,8 +401,8 @@ For isolation between projects:
 
 ```bash
 # Create instance-specific configs
-/etc/fastsearch/project-a.yaml
-/etc/fastsearch/project-b.yaml
+/etc/vps_fastsearch/project-a.yaml
+/etc/vps_fastsearch/project-b.yaml
 
 # Create instance-specific services
 /etc/systemd/system/fastsearch-project-a.service
@@ -427,7 +427,7 @@ For very high load, consider:
 sudo systemctl stop fastsearch
 
 # Upgrade
-sudo -u fastsearch /opt/fastsearch/venv/bin/pip install --upgrade fastsearch
+sudo -u fastsearch /opt/vps_fastsearch/venv/bin/pip install --upgrade fastsearch
 
 # Restart
 sudo systemctl start fastsearch
@@ -437,28 +437,28 @@ sudo systemctl start fastsearch
 
 ```bash
 # Backup database
-/opt/fastsearch/backup.sh
+/opt/vps_fastsearch/backup.sh
 
 # Stop service
 sudo systemctl stop fastsearch
 
 # Create new venv (optional, safer)
-sudo -u fastsearch mv /opt/fastsearch/venv /opt/fastsearch/venv.bak
-sudo -u fastsearch python3.11 -m venv /opt/fastsearch/venv
-sudo -u fastsearch /opt/fastsearch/venv/bin/pip install "fastsearch[rerank]"
+sudo -u fastsearch mv /opt/vps_fastsearch/venv /opt/vps_fastsearch/venv.bak
+sudo -u fastsearch python3.11 -m venv /opt/vps_fastsearch/venv
+sudo -u fastsearch /opt/vps_fastsearch/venv/bin/pip install "vps-fastsearch[rerank]"
 
 # Test
-sudo -u fastsearch /opt/fastsearch/venv/bin/fastsearch --version
+sudo -u fastsearch /opt/vps_fastsearch/venv/bin/fastsearch --version
 
 # Restart
 sudo systemctl start fastsearch
 
 # Verify
 sudo systemctl status fastsearch
-fastsearch search "test query"
+vps-fastsearch search "test query"
 
 # Remove old venv after confirmation
-sudo rm -rf /opt/fastsearch/venv.bak
+sudo rm -rf /opt/vps_fastsearch/venv.bak
 ```
 
 ---
@@ -473,7 +473,7 @@ sudo journalctl -u fastsearch -n 50
 
 # Common issues:
 # 1. Socket already exists (stale from crash)
-sudo rm /run/fastsearch/fastsearch.sock
+sudo rm /run/vps_fastsearch/vps_fastsearch.sock
 
 # 2. Permission denied
 sudo chown -R fastsearch:fastsearch /var/lib/fastsearch
@@ -486,10 +486,10 @@ sudo chown -R fastsearch:fastsearch /var/lib/fastsearch
 
 ```bash
 # Check current usage
-fastsearch daemon status
+vps-fastsearch daemon status
 
 # Reduce memory budget
-sudo vim /etc/fastsearch/config.yaml
+sudo vim /etc/vps_fastsearch/config.yaml
 # Set: memory.max_ram_mb: 1500
 
 # Reload config
@@ -500,10 +500,10 @@ sudo systemctl reload fastsearch
 
 ```bash
 # Check if model is loaded
-fastsearch daemon status
+vps-fastsearch daemon status
 
 # If embedder shows as not loaded, pre-warm:
-fastsearch search "warmup" > /dev/null
+vps-fastsearch search "warmup" > /dev/null
 
 # Or set keep_loaded: always in config
 ```

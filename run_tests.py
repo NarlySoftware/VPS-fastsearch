@@ -238,7 +238,7 @@ def main():
     
     # Unload reranker first via client
     try:
-        from fastsearch import FastSearchClient
+        from vps_fastsearch import FastSearchClient
         client = FastSearchClient()
         client.unload_model("reranker")
         client.close()
@@ -324,7 +324,7 @@ def main():
     print("-" * 40)
     
     try:
-        from fastsearch import FastSearchClient
+        from vps_fastsearch import FastSearchClient
         
         start = time.perf_counter()
         client = FastSearchClient()
@@ -355,7 +355,7 @@ def main():
     print("-" * 40)
     
     try:
-        from fastsearch import FastSearchClient
+        from vps_fastsearch import FastSearchClient
         
         start = time.perf_counter()
         client = FastSearchClient()

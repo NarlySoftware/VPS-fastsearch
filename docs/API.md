@@ -5,16 +5,16 @@ FastSearch provides a Python API for programmatic access to all features.
 ## Installation
 
 ```bash
-pip install fastsearch
+pip install vps-fastsearch
 
 # With reranking support
-pip install "fastsearch[rerank]"
+pip install "vps-fastsearch[rerank]"
 ```
 
 ## Quick Start
 
 ```python
-from fastsearch import FastSearchClient, search, embed
+from vps_fastsearch import FastSearchClient, search, embed
 
 # Use the client (recommended)
 with FastSearchClient() as client:
@@ -50,7 +50,7 @@ FastSearchClient(
 ### Example
 
 ```python
-from fastsearch import FastSearchClient
+from vps_fastsearch import FastSearchClient
 
 # Default connection
 client = FastSearchClient()
@@ -59,7 +59,7 @@ client = FastSearchClient()
 client = FastSearchClient(socket_path="/tmp/custom.sock")
 
 # Custom config
-client = FastSearchClient(config_path="/etc/fastsearch/config.yaml")
+client = FastSearchClient(config_path="/etc/vps_fastsearch/config.yaml")
 
 # Custom timeout
 client = FastSearchClient(timeout=60.0)
@@ -74,7 +74,7 @@ Search indexed documents.
 ```python
 def search(
     query: str,
-    db_path: str = "fastsearch.db",
+    db_path: str = "vps_fastsearch.db",
     limit: int = 10,
     mode: str = "hybrid",
     rerank: bool = False,
@@ -84,7 +84,7 @@ def search(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `query` | `str` | required | Search query text |
-| `db_path` | `str` | `"fastsearch.db"` | Path to database file |
+| `db_path` | `str` | `"vps_fastsearch.db"` | Path to database file |
 | `limit` | `int` | `10` | Maximum results |
 | `mode` | `str` | `"hybrid"` | Search mode: `hybrid`, `bm25`, `vector` |
 | `rerank` | `bool` | `False` | Apply cross-encoder reranking |
@@ -135,7 +135,7 @@ result = client.search("socket_path", mode="bm25")
 result = client.search("how to set up the system", mode="vector")
 
 # Search different database
-result = client.search("query", db_path="/var/lib/fastsearch/main.db")
+result = client.search("query", db_path="/var/lib/vps_fastsearch/main.db")
 ```
 
 ---
@@ -300,7 +300,7 @@ def reload_config(config_path: str | None = None) -> dict[str, Any]
 ### Example
 
 ```python
-result = client.reload_config("/etc/fastsearch/config.yaml")
+result = client.reload_config("/etc/vps_fastsearch/config.yaml")
 print(f"Reloaded: {result['reloaded']}")
 ```
 
@@ -343,12 +343,12 @@ def is_daemon_running(socket_path: str | None = None) -> bool
 Check if daemon is running without creating a client.
 
 ```python
-from fastsearch import FastSearchClient
+from vps_fastsearch import FastSearchClient
 
 if FastSearchClient.is_daemon_running():
     print("Daemon is available")
 else:
-    print("Start the daemon with: fastsearch daemon start")
+    print("Start the daemon with: vps-fastsearch daemon start")
 ```
 
 ---
@@ -360,7 +360,7 @@ Top-level functions that automatically use daemon or fall back to direct mode.
 ### search()
 
 ```python
-from fastsearch import search
+from vps_fastsearch import search
 
 results = search("query")
 results = search("query", limit=20, rerank=True)
@@ -369,7 +369,7 @@ results = search("query", limit=20, rerank=True)
 ### embed()
 
 ```python
-from fastsearch import embed
+from vps_fastsearch import embed
 
 vectors = embed(["text1", "text2"])
 ```
@@ -385,7 +385,7 @@ Lower-level classes for direct usage without daemon.
 Generate embeddings directly.
 
 ```python
-from fastsearch import Embedder
+from vps_fastsearch import Embedder
 
 class Embedder:
     MODEL_NAME = "BAAI/bge-base-en-v1.5"
@@ -399,7 +399,7 @@ class Embedder:
 ### Example
 
 ```python
-from fastsearch import Embedder
+from vps_fastsearch import Embedder
 
 # Create embedder (loads model)
 embedder = Embedder()
@@ -415,7 +415,7 @@ print(f"Dimensions: {len(vector)}")  # 768
 ### Singleton Access
 
 ```python
-from fastsearch import get_embedder
+from vps_fastsearch import get_embedder
 
 # Get singleton instance (reuses loaded model)
 embedder = get_embedder()
@@ -428,7 +428,7 @@ embedder = get_embedder()
 Cross-encoder reranking.
 
 ```python
-from fastsearch import Reranker
+from vps_fastsearch import Reranker
 
 class Reranker:
     MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -446,7 +446,7 @@ class Reranker:
 ### Example
 
 ```python
-from fastsearch import Reranker
+from vps_fastsearch import Reranker
 
 reranker = Reranker()
 
@@ -462,7 +462,7 @@ for idx, score in ranked:
 ### Singleton Access
 
 ```python
-from fastsearch import get_reranker
+from vps_fastsearch import get_reranker
 
 reranker = get_reranker()
 ```
@@ -474,10 +474,10 @@ reranker = get_reranker()
 Database operations.
 
 ```python
-from fastsearch import SearchDB
+from vps_fastsearch import SearchDB
 
 class SearchDB:
-    def __init__(self, db_path: str | Path = "fastsearch.db")
+    def __init__(self, db_path: str | Path = "vps_fastsearch.db")
     
     # Indexing
     def index_document(
@@ -524,7 +524,7 @@ class SearchDB:
 ### Example
 
 ```python
-from fastsearch import SearchDB, Embedder
+from vps_fastsearch import SearchDB, Embedder
 
 # Open database
 db = SearchDB("myproject.db")
@@ -557,7 +557,7 @@ db.close()
 ### Chunking Functions
 
 ```python
-from fastsearch import chunk_text, chunk_markdown
+from vps_fastsearch import chunk_text, chunk_markdown
 
 def chunk_text(
     text: str,
@@ -575,7 +575,7 @@ def chunk_markdown(
 ### Example
 
 ```python
-from fastsearch import chunk_text, chunk_markdown
+from vps_fastsearch import chunk_text, chunk_markdown
 
 # Plain text
 text = open("document.txt").read()
@@ -593,7 +593,7 @@ for chunk, metadata in chunk_markdown(markdown):
 ## Configuration API
 
 ```python
-from fastsearch import (
+from vps_fastsearch import (
     FastSearchConfig,
     load_config,
     create_default_config
@@ -618,7 +618,7 @@ path = create_default_config("/custom/path/config.yaml")
 ## Exceptions
 
 ```python
-from fastsearch import DaemonNotRunningError
+from vps_fastsearch import DaemonNotRunningError
 
 class FastSearchError(Exception):
     """Base exception"""
@@ -630,13 +630,13 @@ class DaemonNotRunningError(FastSearchError):
 ### Example
 
 ```python
-from fastsearch import FastSearchClient, DaemonNotRunningError
+from vps_fastsearch import FastSearchClient, DaemonNotRunningError
 
 try:
     client = FastSearchClient()
     results = client.search("query")
 except DaemonNotRunningError:
-    print("Daemon not running. Start with: fastsearch daemon start")
+    print("Daemon not running. Start with: vps-fastsearch daemon start")
 ```
 
 ---
@@ -648,7 +648,7 @@ except DaemonNotRunningError:
 """Example: Index and search with FastSearch."""
 
 from pathlib import Path
-from fastsearch import (
+from vps_fastsearch import (
     FastSearchClient,
     SearchDB,
     Embedder,
@@ -691,7 +691,7 @@ def index_directory(db_path: str, directory: str):
     print(f"\nTotal: {total_chunks} chunks")
 
 
-def search_with_fallback(query: str, db_path: str = "fastsearch.db"):
+def search_with_fallback(query: str, db_path: str = "vps_fastsearch.db"):
     """Search using daemon if available, otherwise direct."""
     try:
         with FastSearchClient() as client:

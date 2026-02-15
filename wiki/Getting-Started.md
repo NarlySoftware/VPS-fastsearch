@@ -5,7 +5,7 @@ This guide will have you running semantic searches in under 5 minutes.
 ## Installation
 
 ```bash
-pip install fastsearch
+pip install vps-fastsearch
 ```
 
 For reranking support (improves accuracy):
@@ -19,28 +19,28 @@ Create a few test files or use existing markdown/text files:
 
 ```bash
 # Index a single file
-fastsearch index README.md
+vps-fastsearch index README.md
 
 # Index a directory of markdown files
-fastsearch index ./docs --glob "*.md"
+vps-fastsearch index ./docs --glob "*.md"
 
 # Index with a custom database location
-fastsearch index ./notes --db ~/mydata/notes.db
+vps-fastsearch index ./notes --db ~/mydata/notes.db
 ```
 
 ## Step 2: Search
 
 ```bash
 # Basic search
-fastsearch search "how to configure logging"
+vps-fastsearch search "how to configure logging"
 
 # Get more results
-fastsearch search "error handling" --limit 10
+vps-fastsearch search "error handling" --limit 10
 
 # Use specific search mode
-fastsearch search "exact error message" --mode bm25      # keyword matching
-fastsearch search "what does this mean" --mode vector    # semantic meaning
-fastsearch search "configure settings" --mode hybrid     # both (default)
+vps-fastsearch search "exact error message" --mode bm25      # keyword matching
+vps-fastsearch search "what does this mean" --mode vector    # semantic meaning
+vps-fastsearch search "configure settings" --mode hybrid     # both (default)
 ```
 
 ## Step 3: Start the Daemon (Recommended)
@@ -49,19 +49,19 @@ The daemon keeps models loaded in memory for instant searches:
 
 ```bash
 # Start in background
-fastsearch daemon start --detach
+vps-fastsearch daemon start --detach
 
 # Check it's running
-fastsearch daemon status
+vps-fastsearch daemon status
 
 # Now searches are ~4ms instead of ~850ms
-fastsearch search "fast query"
+vps-fastsearch search "fast query"
 ```
 
 ## Step 4: Use from Python
 
 ```python
-from fastsearch import search, embed
+from vps_fastsearch import search, embed
 
 # Search (uses daemon if running, otherwise loads models directly)
 results = search("how to handle errors", limit=5)
@@ -86,9 +86,9 @@ print(f"Embedding dimensions: {len(vectors[0])}")
 
 | Command | Description |
 |---------|-------------|
-| `fastsearch index <path>` | Index files |
-| `fastsearch search "query"` | Search indexed content |
-| `fastsearch daemon start` | Start background daemon |
-| `fastsearch daemon status` | Check daemon status |
-| `fastsearch daemon stop` | Stop daemon |
+| `vps-fastsearch index <path>` | Index files |
+| `vps-fastsearch search "query"` | Search indexed content |
+| `vps-fastsearch daemon start` | Start background daemon |
+| `vps-fastsearch daemon status` | Check daemon status |
+| `vps-fastsearch daemon stop` | Stop daemon |
 | `fastsearch stats` | Show database statistics |

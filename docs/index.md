@@ -20,22 +20,22 @@ Welcome to the FastSearch documentation. FastSearch is a fast hybrid search syst
 
 1. **Install FastSearch**
    ```bash
-   pip install fastsearch
+   pip install vps-fastsearch
    ```
 
 2. **Index your documents**
    ```bash
-   fastsearch index ./docs --glob "*.md"
+   vps-fastsearch index ./docs --glob "*.md"
    ```
 
 3. **Start the daemon** (recommended for production)
    ```bash
-   fastsearch daemon start --detach
+   vps-fastsearch daemon start --detach
    ```
 
 4. **Search**
    ```bash
-   fastsearch search "your query"
+   vps-fastsearch search "your query"
    ```
 
 ## Documentation Structure

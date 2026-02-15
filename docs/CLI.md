@@ -10,7 +10,7 @@ fastsearch [OPTIONS] COMMAND [ARGS]...
 
 | Option | Environment Variable | Description |
 |--------|---------------------|-------------|
-| `--db PATH` | `FASTSEARCH_DB` | Database path (default: `fastsearch.db`) |
+| `--db PATH` | `FASTSEARCH_DB` | Database path (default: `vps_fastsearch.db`) |
 | `--config PATH` | `FASTSEARCH_CONFIG` | Config file path |
 | `--help` | | Show help message |
 
@@ -32,7 +32,7 @@ fastsearch [OPTIONS] COMMAND [ARGS]...
 Index a file or directory of documents.
 
 ```bash
-fastsearch index PATH [OPTIONS]
+vps-fastsearch index PATH [OPTIONS]
 ```
 
 ### Arguments
@@ -52,19 +52,19 @@ fastsearch index PATH [OPTIONS]
 
 ```bash
 # Index a single file
-fastsearch index README.md
+vps-fastsearch index README.md
 
 # Index all markdown files in a directory
-fastsearch index ./docs
+vps-fastsearch index ./docs
 
 # Index with a different pattern
-fastsearch index ./docs --glob "*.txt"
+vps-fastsearch index ./docs --glob "*.txt"
 
 # Index Python files
-fastsearch index ./src --glob "*.py"
+vps-fastsearch index ./src --glob "*.py"
 
 # Re-index (delete and recreate)
-fastsearch index ./docs --reindex
+vps-fastsearch index ./docs --reindex
 
 # Index to a specific database
 fastsearch --db myproject.db index ./docs
@@ -98,7 +98,7 @@ Indexed 33 chunks in 0.49s
 Search indexed documents.
 
 ```bash
-fastsearch search QUERY [OPTIONS]
+vps-fastsearch search QUERY [OPTIONS]
 ```
 
 ### Arguments
@@ -129,25 +129,25 @@ fastsearch search QUERY [OPTIONS]
 
 ```bash
 # Basic hybrid search
-fastsearch search "how to configure settings"
+vps-fastsearch search "how to configure settings"
 
 # Get more results
-fastsearch search "configuration" --limit 10
+vps-fastsearch search "configuration" --limit 10
 
 # BM25 only (keyword matching)
-fastsearch search "socket_path" --mode bm25
+vps-fastsearch search "socket_path" --mode bm25
 
 # Vector only (semantic)
-fastsearch search "how to set up the system" --mode vector
+vps-fastsearch search "how to set up the system" --mode vector
 
 # With reranking (more accurate)
-fastsearch search "complex query about configuration" --rerank
+vps-fastsearch search "complex query about configuration" --rerank
 
 # Force direct mode (no daemon)
-fastsearch search "query" --no-daemon
+vps-fastsearch search "query" --no-daemon
 
 # JSON output for scripting
-fastsearch search "query" --json
+vps-fastsearch search "query" --json
 
 # Search a specific database
 fastsearch --db project.db search "query"
@@ -162,7 +162,7 @@ Search: 'configuration' (hybrid [daemon], 4ms)
     # Configuration Reference FastSearch uses a YAML configuration file...
 
 [2] README.md (chunk 5) - RRF: 0.0298, BM25 #2, Vec #7
-    ## Configuration Create config at `~/.config/fastsearch/config.yaml`...
+    ## Configuration Create config at `~/.config/vps_fastsearch/config.yaml`...
 
 [3] ARCHITECTURE.md (chunk 8) - RRF: 0.0276, BM25 #5, Vec #2
     ### Configuration System The `FastSearchConfig` class manages all settings...
@@ -213,7 +213,7 @@ fastsearch stats
 ### Output
 
 ```
-Database: fastsearch.db
+Database: vps_fastsearch.db
 Size: 2.34 MB
 Total chunks: 156
 Total sources: 12
@@ -278,7 +278,7 @@ Manage the FastSearch daemon server.
 Start the daemon server.
 
 ```bash
-fastsearch daemon start [OPTIONS]
+vps-fastsearch daemon start [OPTIONS]
 ```
 
 | Option | Description |
@@ -288,13 +288,13 @@ fastsearch daemon start [OPTIONS]
 
 ```bash
 # Start in foreground (Ctrl+C to stop)
-fastsearch daemon start
+vps-fastsearch daemon start
 
 # Start in background
-fastsearch daemon start --detach
+vps-fastsearch daemon start --detach
 
 # Start with custom config
-fastsearch daemon start --config /etc/fastsearch/config.yaml
+vps-fastsearch daemon start --config /etc/vps_fastsearch/config.yaml
 ```
 
 ### daemon stop
@@ -302,7 +302,7 @@ fastsearch daemon start --config /etc/fastsearch/config.yaml
 Stop the running daemon.
 
 ```bash
-fastsearch daemon stop [OPTIONS]
+vps-fastsearch daemon stop [OPTIONS]
 ```
 
 | Option | Description |
@@ -310,7 +310,7 @@ fastsearch daemon stop [OPTIONS]
 | `--config PATH` | Config file path (to find socket) |
 
 ```bash
-fastsearch daemon stop
+vps-fastsearch daemon stop
 ```
 
 ### daemon status
@@ -318,7 +318,7 @@ fastsearch daemon stop
 Show daemon status.
 
 ```bash
-fastsearch daemon status [OPTIONS]
+vps-fastsearch daemon status [OPTIONS]
 ```
 
 | Option | Description |
@@ -333,7 +333,7 @@ FastSearch Daemon Status
 Uptime:         2h 15m 30s
 Requests:       1234
 Memory:         520MB / 4000MB
-Socket:         /tmp/fastsearch.sock
+Socket:         /tmp/vps_fastsearch.sock
 
 Loaded Models:
   embedder: 450MB (idle: 5s)
@@ -345,7 +345,7 @@ Loaded Models:
 {
   "uptime_seconds": 8130,
   "request_count": 1234,
-  "socket_path": "/tmp/fastsearch.sock",
+  "socket_path": "/tmp/vps_fastsearch.sock",
   "loaded_models": {
     "embedder": {
       "loaded_at": 1704067200,
@@ -370,7 +370,7 @@ Loaded Models:
 Reload configuration without restart.
 
 ```bash
-fastsearch daemon reload [OPTIONS]
+vps-fastsearch daemon reload [OPTIONS]
 ```
 
 | Option | Description |
@@ -379,10 +379,10 @@ fastsearch daemon reload [OPTIONS]
 
 ```bash
 # Reload default config
-fastsearch daemon reload
+vps-fastsearch daemon reload
 
 # Reload specific config
-fastsearch daemon reload --config /etc/fastsearch/config.yaml
+vps-fastsearch daemon reload --config /etc/vps_fastsearch/config.yaml
 ```
 
 ---
@@ -404,11 +404,11 @@ fastsearch config init [OPTIONS]
 | `--path PATH` | Custom config file path |
 
 ```bash
-# Create at default location (~/.config/fastsearch/config.yaml)
+# Create at default location (~/.config/vps_fastsearch/config.yaml)
 fastsearch config init
 
 # Create at custom location
-fastsearch config init --path /etc/fastsearch/config.yaml
+fastsearch config init --path /etc/vps_fastsearch/config.yaml
 ```
 
 ### config show
@@ -426,7 +426,7 @@ fastsearch config show [OPTIONS]
 **Output:**
 ```yaml
 daemon:
-  socket_path: /tmp/fastsearch.sock
+  socket_path: /tmp/vps_fastsearch.sock
   pid_path: /tmp/fastsearch.pid
   log_level: INFO
 models:
@@ -453,7 +453,7 @@ fastsearch config path
 
 **Output:**
 ```
-/Users/username/.config/fastsearch/config.yaml
+/Users/username/.config/vps_fastsearch/config.yaml
 ```
 
 ---
@@ -477,12 +477,12 @@ fastsearch config path
 
 ```bash
 # Set defaults via environment
-export FASTSEARCH_DB="/var/lib/fastsearch/main.db"
-export FASTSEARCH_CONFIG="/etc/fastsearch/config.yaml"
+export FASTSEARCH_DB="/var/lib/vps_fastsearch/main.db"
+export FASTSEARCH_CONFIG="/etc/vps_fastsearch/config.yaml"
 
 # Now all commands use these defaults
-fastsearch index ./docs
-fastsearch search "query"
+vps-fastsearch index ./docs
+vps-fastsearch search "query"
 ```
 
 ---

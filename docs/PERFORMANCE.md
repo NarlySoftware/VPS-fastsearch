@@ -138,10 +138,10 @@ Tested on Apple M2 (MacBook Air, 8GB RAM) with 1000 document chunks (~500 tokens
 
 ```bash
 # Start daemon once
-fastsearch daemon start --detach
+vps-fastsearch daemon start --detach
 
 # All subsequent searches are instant
-fastsearch search "query"  # ~4ms vs ~850ms
+vps-fastsearch search "query"  # ~4ms vs ~850ms
 ```
 
 ### 2. Batch Operations
@@ -193,7 +193,7 @@ results = client.search("complex ambiguous query", rerank=True)
 # Periodic optimization
 import apsw
 
-conn = apsw.Connection("fastsearch.db")
+conn = apsw.Connection("vps_fastsearch.db")
 conn.execute("VACUUM")  # Reclaim space
 conn.execute("ANALYZE")  # Update statistics
 ```
@@ -202,7 +202,7 @@ conn.execute("ANALYZE")  # Update statistics
 
 ```bash
 # For exact matches, skip vector search
-fastsearch search "error_code_123" --mode bm25  # 2ms
+vps-fastsearch search "error_code_123" --mode bm25  # 2ms
 ```
 
 ### 7. Limit Results Appropriately
@@ -285,7 +285,7 @@ memory:
 
 ```python
 import apsw
-conn = apsw.Connection("fastsearch.db")
+conn = apsw.Connection("vps_fastsearch.db")
 conn.execute("PRAGMA cache_size = -100000")  # 100MB cache
 conn.execute("PRAGMA mmap_size = 1073741824")  # 1GB mmap
 ```
@@ -306,7 +306,7 @@ daemon:
 
 ```python
 import time
-from fastsearch import FastSearchClient
+from vps_fastsearch import FastSearchClient
 
 client = FastSearchClient()
 
@@ -324,7 +324,7 @@ print(f"Network overhead: {(total*1000 - result['search_time_ms']):.1f}ms")
 
 ```python
 import time
-from fastsearch import Embedder, SearchDB, chunk_text
+from vps_fastsearch import Embedder, SearchDB, chunk_text
 
 content = open("large_file.md").read()
 chunks = list(chunk_text(content))

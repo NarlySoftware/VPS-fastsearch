@@ -2,7 +2,7 @@
 """Benchmark comparing hybrid search with and without cross-encoder reranking."""
 
 import time
-from fastsearch import SearchDB, get_embedder, get_reranker
+from vps_fastsearch import SearchDB, get_embedder, get_reranker
 
 # Test queries with expected top results
 TEST_QUERIES = [
