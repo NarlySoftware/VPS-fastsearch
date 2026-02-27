@@ -16,14 +16,14 @@ echo "=== VPS-FastSearch Installer ==="
 echo ""
 
 # ---- Step 1: Ensure Python 3.13 is available ----
-echo "[1/7] Installing Python 3.13 and dependencies..."
+echo "[1/8] Installing Python 3.13 and dependencies..."
 
 sudo apt-get update -qq
 sudo apt-get install -y python3.13 python3.13-venv python3.13-dev python3-full
 echo "  Python 3.13 ready: $(python3.13 --version)"
 
 # ---- Step 2: Create virtual environment ----
-echo "[2/7] Setting up virtual environment..."
+echo "[2/8] Setting up virtual environment..."
 
 if [ -d "$VENV_DIR" ]; then
     echo "  Venv already exists at $VENV_DIR"
@@ -36,13 +36,13 @@ fi
 "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
 
 # ---- Step 3: Install VPS-FastSearch ----
-echo "[3/7] Installing VPS-FastSearch..."
+echo "[3/8] Installing VPS-FastSearch..."
 
 "$VENV_DIR/bin/pip" install --timeout 120 "$INSTALL_DIR[all]" --quiet
 echo "  Installed vps-fastsearch with all extras"
 
 # ---- Step 4: Verify native extensions ----
-echo "[4/7] Verifying native extensions..."
+echo "[4/8] Verifying native extensions..."
 
 if "$VENV_DIR/bin/python" -c "import sqlite_vec; import apsw; import onnxruntime; print('Native extensions OK')"; then
     echo "  Native extensions loaded successfully"
@@ -52,7 +52,7 @@ else
 fi
 
 # ---- Step 5: Symlink CLI to ~/.local/bin ----
-echo "[5/7] Setting up CLI symlink..."
+echo "[5/8] Setting up CLI symlink..."
 
 mkdir -p "$LOCAL_BIN"
 
@@ -65,7 +65,7 @@ ln -s "$VENV_DIR/bin/vps-fastsearch" "$LOCAL_BIN/vps-fastsearch"
 echo "  Symlinked vps-fastsearch to $LOCAL_BIN/vps-fastsearch"
 
 # ---- Step 6: Install default config ----
-echo "[6/7] Setting up configuration..."
+echo "[6/8] Setting up configuration..."
 
 if [ -f "$CONFIG_DIR/config.yaml" ]; then
     echo "  Config already exists at $CONFIG_DIR/config.yaml (not overwriting)"
@@ -80,13 +80,36 @@ else
 fi
 
 # ---- Step 7: Smoke test ----
-echo "[7/7] Running smoke test..."
+echo "[7/8] Running smoke test..."
 
 if "$VENV_DIR/bin/vps-fastsearch" --help > /dev/null 2>&1; then
     echo "  vps-fastsearch --help: OK"
 else
     echo "  ERROR: vps-fastsearch --help failed"
     exit 1
+fi
+
+# ---- Step 8: Install systemd user service ----
+echo "[8/8] Installing systemd user service..."
+
+SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
+mkdir -p "$SYSTEMD_USER_DIR"
+
+if [ -f "$INSTALL_DIR/vps-fastsearch.service" ]; then
+    cp "$INSTALL_DIR/vps-fastsearch.service" "$SYSTEMD_USER_DIR/vps-fastsearch.service"
+    echo "  Installed service to $SYSTEMD_USER_DIR/vps-fastsearch.service"
+
+    # Enable and start the service if systemctl --user is available
+    if systemctl --user daemon-reload 2>/dev/null; then
+        systemctl --user enable vps-fastsearch.service 2>/dev/null && \
+            echo "  Enabled vps-fastsearch service" || \
+            echo "  Could not enable service (systemd user session may not be available)"
+        echo "  Start with: systemctl --user start vps-fastsearch"
+    else
+        echo "  systemctl --user not available (enable manually after login)"
+    fi
+else
+    echo "  Service file not found, skipping"
 fi
 
 # ---- Done ----

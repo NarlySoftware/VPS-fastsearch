@@ -9,15 +9,12 @@ import orjson
 
 from .chunker import chunk_markdown, chunk_text
 from .core import SearchDB, get_embedder
-from .config import load_config, create_default_config, DEFAULT_CONFIG_PATH
+from .config import load_config, create_default_config, DEFAULT_CONFIG_PATH, DEFAULT_DB_PATH
 from .client import FastSearchClient, DaemonNotRunningError
 
 
-DEFAULT_DB = "fastsearch.db"
-
-
 @click.group()
-@click.option("--db", default=DEFAULT_DB, help="Database path", envvar="FASTSEARCH_DB")
+@click.option("--db", default=DEFAULT_DB_PATH, help="Database path", envvar="FASTSEARCH_DB")
 @click.option("--config", "config_path", default=None, help="Config file path", envvar="FASTSEARCH_CONFIG")
 @click.pass_context
 def cli(ctx, db, config_path):

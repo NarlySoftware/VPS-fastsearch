@@ -50,13 +50,16 @@ def chunk_text(
                 if overlap_text:
                     chunk_text_out = overlap_text + "\n\n" + chunk_text_out
                 yield chunk_text_out.strip()
-                overlap_text = current_chunk[-1][-overlap_chars:] if current_chunk else ""
+                overlap_text = "\n\n".join(current_chunk)[-overlap_chars:] if current_chunk else ""
                 current_chunk = []
                 current_size = 0
             
-            # Split long paragraph by sentences
-            for sent_chunk in _split_long_paragraph(para, target_chars, overlap_chars):
+            # Split long paragraph by sentences, prepending overlap so context carries through
+            para_to_split = (overlap_text + "\n\n" + para) if overlap_text else para
+            for sent_chunk in _split_long_paragraph(para_to_split, target_chars, overlap_chars):
                 yield sent_chunk
+            # Update overlap_text from the end of the original paragraph (not the prepended version)
+            overlap_text = para[-overlap_chars:]
             continue
         
         # Check if adding this paragraph exceeds target
@@ -68,7 +71,7 @@ def chunk_text(
             yield chunk_text_out.strip()
             
             # Keep overlap from end of current chunk
-            overlap_text = current_chunk[-1][-overlap_chars:] if current_chunk else ""
+            overlap_text = "\n\n".join(current_chunk)[-overlap_chars:] if current_chunk else ""
             current_chunk = []
             current_size = 0
         
@@ -90,7 +93,13 @@ def _split_long_paragraph(
 ) -> Iterator[str]:
     """Split a long paragraph by sentences."""
     # Split by sentence boundaries
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+    sentences = re.split(
+        r'(?<=[.!?])'           # After sentence-ending punctuation
+        r'(?<!\b[A-Z]\.)'       # Not after single capital letter (initials like "J.")
+        r'(?<!\b(?:Dr|Mr|Ms|Mrs|Prof|Sr|Jr|vs|etc|Inc|Ltd|St|Ave|Rd|Vol|No|Fig|approx)\.)'
+        r'\s+',
+        text,
+    )
     
     current_chunk: list[str] = []
     current_size = 0

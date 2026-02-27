@@ -1,5 +1,6 @@
 """Core classes for VPS-FastSearch: Embedder, Reranker, and SearchDB."""
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,7 @@ class Embedder:
         from fastembed import TextEmbedding
         
         self.model_name = model_name or self.MODEL_NAME
-        self._model = TextEmbedding(self.model_name)
+        self._model = TextEmbedding(self.model_name, threads=2)
     
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a list of texts."""
@@ -107,7 +108,7 @@ class Reranker:
         indexed_scores = list(enumerate(scores))
         indexed_scores.sort(key=lambda x: x[1], reverse=True)
         
-        if top_k:
+        if top_k is not None:
             indexed_scores = indexed_scores[:top_k]
         
         return indexed_scores
@@ -131,15 +132,27 @@ class SearchDB:
     - Hybrid search using RRF (Reciprocal Rank Fusion)
     """
     
-    def __init__(self, db_path: str | Path = "fastsearch.db"):
+    EMBEDDING_DIM = 768
+    MAX_SEARCH_LIMIT = 10000
+
+    def __init__(self, db_path: str | Path | None = None):
+        if db_path is None:
+            from .config import DEFAULT_DB_PATH
+            db_path = os.environ.get("FASTSEARCH_DB", DEFAULT_DB_PATH)
         self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = apsw.Connection(str(self.db_path))
         
         # Load sqlite-vec extension
         self.conn.enableloadextension(True)
         self.conn.loadextension(sqlite_vec.loadable_path())
         self.conn.enableloadextension(False)
-        
+
+        # Enable WAL mode for concurrent read/write access
+        self._execute("PRAGMA journal_mode=WAL")
+        # Wait up to 5 seconds if database is locked
+        self._execute("PRAGMA busy_timeout=5000")
+
         self._init_schema()
     
     def _execute(self, sql: str, params: tuple = ()) -> apsw.Cursor:
@@ -162,12 +175,18 @@ class SearchDB:
         
         self._execute("CREATE INDEX IF NOT EXISTS idx_docs_source ON docs(source)")
         
+        self._execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_docs_source_chunk "
+            "ON docs(source, chunk_index)"
+        )
+
         # FTS5 virtual table
         self._execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
                 content,
                 content='docs',
-                content_rowid='id'
+                content_rowid='id',
+                tokenize='porter unicode61'
             )
         """)
         
@@ -195,7 +214,7 @@ class SearchDB:
         self._execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS docs_vec USING vec0(
                 id INTEGER PRIMARY KEY,
-                embedding float64[768]
+                embedding float32[768]
             )
         """)
     
@@ -212,27 +231,41 @@ class SearchDB:
         
         Returns the document ID.
         """
-        # Insert into main docs table (triggers handle FTS)
-        self._execute(
-            """
-            INSERT INTO docs (source, chunk_index, content, metadata)
-            VALUES (?, ?, ?, ?)
-            """,
-            (source, chunk_index, content, orjson.dumps(metadata or {}).decode()),
-        )
-        doc_id = self.conn.last_insert_rowid()
-        
-        # Insert embedding into vector table using serialize_float32
-        self._execute(
-            """
-            INSERT INTO docs_vec (id, embedding)
-            VALUES (?, ?)
-            """,
-            (doc_id, sqlite_vec.serialize_float32(embedding)),
-        )
-        
+        if len(embedding) != self.EMBEDDING_DIM:
+            raise ValueError(
+                f"Expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}"
+            )
+        self.conn.execute("BEGIN")
+        try:
+            # Insert into main docs table (triggers handle FTS)
+            self._execute(
+                """
+                INSERT INTO docs (source, chunk_index, content, metadata)
+                VALUES (?, ?, ?, ?)
+                """,
+                (source, chunk_index, content, orjson.dumps(metadata or {}).decode()),
+            )
+            doc_id = self.conn.last_insert_rowid()
+
+            # Insert embedding into vector table
+            self._execute(
+                """
+                INSERT INTO docs_vec (id, embedding)
+                VALUES (?, ?)
+                """,
+                (doc_id, sqlite_vec.serialize_float32(embedding)),
+            )
+
+            self.conn.execute("COMMIT")
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass  # ROLLBACK can fail if disk is full
+            raise
+
         return doc_id
-    
+
     def index_batch(
         self,
         items: list[tuple[str, int, str, list[float], dict | None]],
@@ -243,27 +276,43 @@ class SearchDB:
         Each item is (source, chunk_index, content, embedding, metadata).
         Returns list of document IDs.
         """
+        for i, (_, _, _, embedding, _) in enumerate(items):
+            if len(embedding) != self.EMBEDDING_DIM:
+                raise ValueError(
+                    f"Item {i}: expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}"
+                )
+
         doc_ids = []
-        
-        for source, chunk_index, content, embedding, metadata in items:
-            self._execute(
-                """
-                INSERT INTO docs (source, chunk_index, content, metadata)
-                VALUES (?, ?, ?, ?)
-                """,
-                (source, chunk_index, content, orjson.dumps(metadata or {}).decode()),
-            )
-            doc_id = self.conn.last_insert_rowid()
-            doc_ids.append(doc_id)
-            
-            self._execute(
-                """
-                INSERT INTO docs_vec (id, embedding)
-                VALUES (?, ?)
-                """,
-                (doc_id, sqlite_vec.serialize_float32(embedding)),
-            )
-        
+
+        self.conn.execute("BEGIN")
+        try:
+            for source, chunk_index, content, embedding, metadata in items:
+                self._execute(
+                    """
+                    INSERT INTO docs (source, chunk_index, content, metadata)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (source, chunk_index, content, orjson.dumps(metadata or {}).decode()),
+                )
+                doc_id = self.conn.last_insert_rowid()
+                doc_ids.append(doc_id)
+
+                self._execute(
+                    """
+                    INSERT INTO docs_vec (id, embedding)
+                    VALUES (?, ?)
+                    """,
+                    (doc_id, sqlite_vec.serialize_float32(embedding)),
+                )
+
+            self.conn.execute("COMMIT")
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass  # ROLLBACK can fail if disk is full
+            raise
+
         return doc_ids
     
     def search_bm25(
@@ -276,10 +325,18 @@ class SearchDB:
 
         Returns list of results with id, source, content, score, rank.
         """
+        if limit < 0:
+            raise ValueError(f"limit must be >= 0, got {limit}")
+        if limit == 0:
+            return []
+        limit = min(limit, self.MAX_SEARCH_LIMIT)
+
         # Sanitize query for FTS5: extract word tokens and join with OR
         # to avoid crashes on special characters like hyphens (column operators).
         tokens = re.findall(r"\w+", query)
-        fts_query = " OR ".join(f'"{t}"' for t in tokens) if tokens else '""'
+        if not tokens:
+            return []
+        fts_query = " OR ".join(f'"{t}"' for t in tokens)
 
         cursor = self._execute(
             """
@@ -324,6 +381,16 @@ class SearchDB:
         
         Returns list of results with id, source, content, distance, rank.
         """
+        if limit < 0:
+            raise ValueError(f"limit must be >= 0, got {limit}")
+        if limit == 0:
+            return []
+        limit = min(limit, self.MAX_SEARCH_LIMIT)
+
+        if len(embedding) != self.EMBEDDING_DIM:
+            raise ValueError(
+                f"Expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}"
+            )
         cursor = self._execute(
             """
             SELECT 
@@ -373,10 +440,21 @@ class SearchDB:
         
         Returns list of results sorted by RRF score (descending).
         """
+        if limit < 0:
+            raise ValueError(f"limit must be >= 0, got {limit}")
+        if limit == 0:
+            return []
+        limit = min(limit, self.MAX_SEARCH_LIMIT)
+
+        if k < 1:
+            raise ValueError(f"RRF k parameter must be >= 1, got {k}")
+
         # Get more results from each method for better fusion
         fetch_limit = limit * 3
-        
-        bm25_results = self.search_bm25(query, limit=fetch_limit)
+
+        # Skip BM25 if query has no word tokens (symbols, emoji, etc.)
+        tokens = re.findall(r"\w+", query)
+        bm25_results = self.search_bm25(query, limit=fetch_limit) if tokens else []
         vec_results = self.search_vector(embedding, limit=fetch_limit)
         
         # Build rank maps
@@ -412,7 +490,7 @@ class SearchDB:
             rrf_results.append(result)
         
         # Sort by RRF score descending
-        rrf_results.sort(key=lambda x: x["rrf_score"], reverse=True)
+        rrf_results.sort(key=lambda x: (-x["rrf_score"], x["id"]))
         
         # Assign final ranks
         for i, r in enumerate(rrf_results[:limit], 1):
@@ -445,6 +523,12 @@ class SearchDB:
         Returns:
             List of results sorted by reranker score (descending).
         """
+        if limit < 0:
+            raise ValueError(f"limit must be >= 0, got {limit}")
+        if limit == 0:
+            return []
+        limit = min(limit, self.MAX_SEARCH_LIMIT)
+
         # Get candidates from hybrid search
         candidates = self.search_hybrid(query, embedding, limit=rerank_top_k)
         
@@ -471,9 +555,16 @@ class SearchDB:
         # Assign final ranks and return top limit
         for i, r in enumerate(candidates[:limit], 1):
             r["rank"] = i
-        
+
+        # Remove stale RRF fields that are no longer meaningful after reranking
+        for result in candidates[:limit]:
+            result.pop("rrf_score", None)
+            result.pop("bm25_rank", None)
+            result.pop("vec_rank", None)
+            result.pop("score", None)
+
         return candidates[:limit]
-    
+
     def delete_source(self, source: str) -> int:
         """Delete all chunks from a source. Returns count deleted."""
         # Get IDs to delete from vector table
@@ -482,12 +573,21 @@ class SearchDB:
         )]
         
         if ids:
-            # Delete from vector table
-            for doc_id in ids:
-                self._execute("DELETE FROM docs_vec WHERE id = ?", (doc_id,))
-            # Delete from docs (triggers handle FTS)
-            self._execute("DELETE FROM docs WHERE source = ?", (source,))
-        
+            self.conn.execute("BEGIN")
+            try:
+                # Delete from vector table
+                for doc_id in ids:
+                    self._execute("DELETE FROM docs_vec WHERE id = ?", (doc_id,))
+                # Delete from docs (triggers handle FTS)
+                self._execute("DELETE FROM docs WHERE source = ?", (source,))
+                self.conn.execute("COMMIT")
+            except Exception:
+                try:
+                    self.conn.execute("ROLLBACK")
+                except Exception:
+                    pass  # ROLLBACK can fail if disk is full
+                raise
+
         return len(ids)
     
     def get_stats(self) -> dict[str, Any]:

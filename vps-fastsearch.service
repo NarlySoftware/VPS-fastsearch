@@ -5,20 +5,18 @@ After=network.target
 
 [Service]
 Type=simple
-User=fastsearch
-Group=fastsearch
 
-# Main executable
-ExecStart=/usr/local/bin/vps-fastsearch daemon start
-ExecStop=/usr/local/bin/vps-fastsearch daemon stop
-ExecReload=/usr/local/bin/vps-fastsearch daemon reload
+# Main executable (install.sh puts venv in ~/fastsearch/.venv)
+ExecStart=%h/fastsearch/.venv/bin/vps-fastsearch daemon start
+ExecStop=%h/fastsearch/.venv/bin/vps-fastsearch daemon stop
+ExecReload=%h/fastsearch/.venv/bin/vps-fastsearch daemon reload
 
-# Environment
-Environment="FASTSEARCH_CONFIG=/etc/fastsearch/config.yaml"
-Environment="FASTSEARCH_DB=/var/lib/fastsearch/fastsearch.db"
+# Environment (install.sh puts config in ~/.config/fastsearch/)
+Environment="FASTSEARCH_CONFIG=%h/.config/fastsearch/config.yaml"
+Environment="FASTSEARCH_DB=%h/fastsearch/fastsearch.db"
 
 # Working directory
-WorkingDirectory=/var/lib/fastsearch
+WorkingDirectory=%h/fastsearch
 
 # Restart policy
 Restart=always
@@ -28,16 +26,13 @@ RestartSec=5
 MemoryMax=4G
 MemoryHigh=3G
 
-# Security hardening
+# Security hardening (user-service compatible)
 NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/fastsearch /tmp
 
 # Timeout
 TimeoutStartSec=120
 TimeoutStopSec=30
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

@@ -16,7 +16,7 @@ from typing import Any, Callable
 
 import psutil
 
-from .config import FastSearchConfig, load_config, ModelConfig
+from .config import DEFAULT_DB_PATH, FastSearchConfig, load_config, ModelConfig
 
 # Configure logging
 logger = logging.getLogger("vps_fastsearch.daemon")
@@ -30,10 +30,31 @@ class LoadedModel:
     loaded_at: float
     last_used: float
     memory_mb: float = 0.0
-    
+    actual_memory_mb: float = 0.0
+    ref_count: int = 0
+
     def touch(self):
         """Update last used timestamp."""
         self.last_used = time.time()
+
+
+class _RerankerAdapter:
+    """Lightweight adapter that wraps a raw CrossEncoder instance to match the
+    ``Reranker.rerank(query, documents)`` interface expected by
+    ``SearchDB.search_hybrid_reranked``.  This avoids creating a second
+    ``Reranker`` singleton (~90 MB) when the daemon already has the model
+    loaded via ``ModelManager``.
+    """
+
+    def __init__(self, cross_encoder: Any) -> None:
+        self._model = cross_encoder
+
+    def rerank(self, query: str, documents: list[str]) -> list[float]:
+        if not documents:
+            return []
+        pairs = [[query, doc] for doc in documents]
+        scores = self._model.predict(pairs)
+        return scores.tolist()
 
 
 class ModelManager:
@@ -66,15 +87,25 @@ class ModelManager:
         }
         return estimates.get(slot, 500)
     
-    def _load_model_sync(self, slot: str) -> Any:
-        """Synchronously load a model (run in executor)."""
+    def _load_model_sync(self, slot: str) -> tuple[Any, float]:
+        """Synchronously load a model (run in executor).
+
+        Returns (instance, actual_memory_mb) where actual_memory_mb is the
+        measured RSS delta during load, or 0.0 if measurement failed.
+        """
         model_config = self.config.models.get(slot)
         if not model_config:
             raise ValueError(f"Unknown model slot: {slot}")
-        
+
         logger.info(f"Loading model: {slot} ({model_config.name})")
         start = time.perf_counter()
-        
+
+        # Measure RSS before load
+        try:
+            rss_before = psutil.Process().memory_info().rss
+        except Exception:
+            rss_before = None
+
         if slot == "embedder":
             from fastembed import TextEmbedding
             # Limit ONNX threads to reduce arena memory allocation
@@ -84,54 +115,81 @@ class ModelManager:
             instance = CrossEncoder(model_config.name)
         else:
             raise ValueError(f"Unknown model slot: {slot}")
-        
+
+        # Measure RSS after load
+        actual_memory_mb = 0.0
+        if rss_before is not None:
+            try:
+                rss_after = psutil.Process().memory_info().rss
+                delta_mb = (rss_after - rss_before) / (1024 * 1024)
+                # Only trust the measurement if it's meaningful (>10MB)
+                if delta_mb >= 10:
+                    actual_memory_mb = delta_mb
+            except Exception:
+                pass
+
         elapsed = time.perf_counter() - start
         logger.info(f"Loaded {slot} in {elapsed:.2f}s")
-        
-        return instance
+
+        return instance, actual_memory_mb
     
     async def load_model(self, slot: str) -> LoadedModel:
         """Load a model into memory."""
         async with self._load_lock:
+            # Cancel any pending unload before checking if loaded
+            if slot in self._unload_tasks:
+                self._unload_tasks[slot].cancel()
+                del self._unload_tasks[slot]
+
             # Already loaded?
             if slot in self._models:
                 model = self._models[slot]
                 model.touch()
+                model.ref_count += 1
                 # Move to end for LRU
                 self._models.move_to_end(slot)
                 return model
-            
-            # Cancel any pending unload
-            if slot in self._unload_tasks:
-                self._unload_tasks[slot].cancel()
-                del self._unload_tasks[slot]
-            
+
             # Check memory budget
             await self._ensure_memory_budget(slot)
-            
+
             # Load model in thread pool
-            loop = asyncio.get_event_loop()
-            instance = await loop.run_in_executor(None, self._load_model_sync, slot)
-            
-            # Create tracking entry
+            loop = asyncio.get_running_loop()
+            instance, actual_memory_mb = await loop.run_in_executor(
+                None, self._load_model_sync, slot
+            )
+
+            # Create tracking entry — prefer measured memory over estimate
             now = time.time()
-            memory_mb = self.estimate_model_memory(slot)
-            
+            estimated_mb = self.estimate_model_memory(slot)
+            memory_mb = actual_memory_mb if actual_memory_mb > 0 else estimated_mb
+
             model = LoadedModel(
                 slot=slot,
                 instance=instance,
                 loaded_at=now,
                 last_used=now,
                 memory_mb=memory_mb,
+                actual_memory_mb=actual_memory_mb,
+                ref_count=1,
             )
-            
+
             self._models[slot] = model
-            logger.info(f"Model {slot} loaded. Memory: {self.get_memory_usage():.0f}MB")
-            
+            logger.info(
+                f"Model {slot} loaded. Memory: {self.get_memory_usage():.0f}MB"
+            )
+
             # Schedule unload if on-demand
             self._schedule_unload(slot)
-            
+
             return model
+
+    async def release_model(self, slot: str) -> None:
+        """Release a reference to a loaded model."""
+        async with self._load_lock:
+            if slot in self._models:
+                model = self._models[slot]
+                model.ref_count = max(0, model.ref_count - 1)
     
     async def _ensure_memory_budget(self, slot: str):
         """Evict models if needed to fit new model."""
@@ -156,15 +214,28 @@ class ModelManager:
                 break
             
             await self.unload_model(evict_slot)
+            # If model wasn't actually unloaded (ref_count > 0), stop trying
+            if evict_slot in self._models:
+                logger.warning(
+                    f"Cannot evict {evict_slot}: still has active references"
+                )
+                break
             current_usage = self.get_memory_usage()
     
     async def unload_model(self, slot: str):
         """Unload a model from memory."""
         if slot not in self._models:
             return
-        
+
         model = self._models[slot]
-        
+
+        # Don't unload models with active references
+        if model.ref_count > 0:
+            logger.info(
+                f"Skipping unload of {slot}: {model.ref_count} active refs"
+            )
+            return
+
         # Don't unload "always" models
         model_config = self.config.models.get(slot)
         if model_config and model_config.keep_loaded == "always":
@@ -228,6 +299,7 @@ class ModelManager:
                     "loaded_at": model.loaded_at,
                     "last_used": model.last_used,
                     "memory_mb": model.memory_mb,
+                    "actual_memory_mb": model.actual_memory_mb,
                     "idle_seconds": time.time() - model.last_used,
                 }
                 for slot, model in self._models.items()
@@ -268,7 +340,8 @@ class FastSearchDaemon:
         self._start_time: float | None = None
         self._request_count = 0
         self._shutdown_event = asyncio.Event()
-        
+        self._db_cache: dict[str, "SearchDB"] = {}
+
         # Handler registry
         self._handlers: dict[str, Callable] = {
             "ping": self._handle_ping,
@@ -297,50 +370,86 @@ class FastSearchDaemon:
             **model_status,
         }
     
+    _DB_CACHE_MAX: int = 8
+
+    def _get_db(self, db_path: str) -> "SearchDB":
+        """Get or create a cached SearchDB connection.
+
+        Validates that db_path resolves to a location under the allowed base
+        directory (parent of DEFAULT_DB_PATH) to prevent path traversal attacks.
+        Caps the connection cache at _DB_CACHE_MAX entries.
+        """
+        allowed_base = Path(DEFAULT_DB_PATH).resolve().parent
+        resolved = Path(db_path).resolve()
+        if allowed_base not in resolved.parents and resolved != allowed_base:
+            raise ValueError(
+                f"db_path must be under {allowed_base}"
+            )
+        key = str(resolved)
+        if key not in self._db_cache:
+            from .core import SearchDB
+
+            # Evict oldest entry if cache is full
+            if len(self._db_cache) >= self._DB_CACHE_MAX:
+                oldest_key = next(iter(self._db_cache))
+                try:
+                    self._db_cache[oldest_key].close()
+                except Exception:
+                    pass
+                del self._db_cache[oldest_key]
+            self._db_cache[key] = SearchDB(str(resolved))
+        return self._db_cache[key]
+
     async def _handle_search(self, params: dict) -> dict:
         """Handle search request."""
-        from .core import SearchDB
-        
         query = params.get("query")
         if not query:
             raise ValueError("Missing 'query' parameter")
-        
-        db_path = params.get("db_path", "fastsearch.db")
+
+        db_path = params.get("db_path", DEFAULT_DB_PATH)
         limit = params.get("limit", 10)
         mode = params.get("mode", "hybrid")
         rerank = params.get("rerank", False)
-        
+
         # Get or load embedder
         embedder_model = await self.model_manager.load_model("embedder")
-        embedder_model.touch()
-        
-        db = SearchDB(db_path)
-        
+        reranker_model = None
+
+        db = self._get_db(db_path)
+
         try:
             start_time = time.perf_counter()
-            
+
             if mode == "bm25":
                 results = db.search_bm25(query, limit=limit)
             elif mode == "vector":
-                embedding = list(embedder_model.instance.embed([query]))[0].tolist()
+                embedding = list(
+                    embedder_model.instance.embed([query])
+                )[0].tolist()
                 results = db.search_vector(embedding, limit=limit)
             else:  # hybrid
-                embedding = list(embedder_model.instance.embed([query]))[0].tolist()
-                
+                embedding = list(
+                    embedder_model.instance.embed([query])
+                )[0].tolist()
+
                 if rerank:
                     # Load reranker on-demand
-                    reranker_model = await self.model_manager.load_model("reranker")
-                    reranker_model.touch()
-                    
+                    reranker_model = await self.model_manager.load_model(
+                        "reranker"
+                    )
+
                     results = db.search_hybrid_reranked(
                         query, embedding, limit=limit,
                         rerank_top_k=min(limit * 3, 30),
+                        reranker=_RerankerAdapter(reranker_model.instance),
                     )
                 else:
-                    results = db.search_hybrid(query, embedding, limit=limit)
-            
+                    results = db.search_hybrid(
+                        query, embedding, limit=limit
+                    )
+
             search_time = time.perf_counter() - start_time
-            
+
             return {
                 "query": query,
                 "mode": mode,
@@ -349,65 +458,86 @@ class FastSearchDaemon:
                 "results": results,
             }
         finally:
-            db.close()
+            await self.model_manager.release_model("embedder")
+            if reranker_model is not None:
+                await self.model_manager.release_model("reranker")
     
     async def _handle_embed(self, params: dict) -> dict:
         """Generate embeddings for texts."""
         texts = params.get("texts", [])
         if not texts:
             raise ValueError("Missing 'texts' parameter")
-        
+
+        MAX_BATCH_SIZE = 256
+        if len(texts) > MAX_BATCH_SIZE:
+            raise ValueError(f"Too many texts: {len(texts)} (max {MAX_BATCH_SIZE})")
+
         embedder_model = await self.model_manager.load_model("embedder")
-        embedder_model.touch()
-        
-        start_time = time.perf_counter()
-        embeddings = list(embedder_model.instance.embed(texts))
-        embed_time = time.perf_counter() - start_time
-        
-        return {
-            "embeddings": [e.tolist() for e in embeddings],
-            "count": len(embeddings),
-            "embed_time_ms": round(embed_time * 1000, 2),
-        }
+
+        try:
+            start_time = time.perf_counter()
+            embeddings = list(embedder_model.instance.embed(texts))
+            embed_time = time.perf_counter() - start_time
+
+            return {
+                "embeddings": [e.tolist() for e in embeddings],
+                "count": len(embeddings),
+                "embed_time_ms": round(embed_time * 1000, 2),
+            }
+        finally:
+            await self.model_manager.release_model("embedder")
     
     async def _handle_rerank(self, params: dict) -> dict:
         """Rerank documents against query."""
         query = params.get("query")
         documents = params.get("documents", [])
-        
+
         if not query:
             raise ValueError("Missing 'query' parameter")
         if not documents:
             raise ValueError("Missing 'documents' parameter")
-        
+
+        MAX_RERANK_SIZE = 100
+        if len(documents) > MAX_RERANK_SIZE:
+            raise ValueError(f"Too many documents: {len(documents)} (max {MAX_RERANK_SIZE})")
+
         reranker_model = await self.model_manager.load_model("reranker")
-        reranker_model.touch()
-        
-        start_time = time.perf_counter()
-        
-        # Cross-encoder expects pairs
-        pairs = [[query, doc] for doc in documents]
-        scores = reranker_model.instance.predict(pairs).tolist()
-        
-        rerank_time = time.perf_counter() - start_time
-        
-        # Return sorted indices with scores
-        indexed_scores = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
-        
-        return {
-            "scores": scores,
-            "ranked": [{"index": idx, "score": score} for idx, score in indexed_scores],
-            "rerank_time_ms": round(rerank_time * 1000, 2),
-        }
+
+        try:
+            start_time = time.perf_counter()
+
+            # Cross-encoder expects pairs
+            pairs = [[query, doc] for doc in documents]
+            scores = reranker_model.instance.predict(pairs).tolist()
+
+            rerank_time = time.perf_counter() - start_time
+
+            # Return sorted indices with scores
+            indexed_scores = sorted(
+                enumerate(scores), key=lambda x: x[1], reverse=True
+            )
+
+            return {
+                "scores": scores,
+                "ranked": [
+                    {"index": idx, "score": score}
+                    for idx, score in indexed_scores
+                ],
+                "rerank_time_ms": round(rerank_time * 1000, 2),
+            }
+        finally:
+            await self.model_manager.release_model("reranker")
     
     async def _handle_load_model(self, params: dict) -> dict:
         """Load a model slot."""
         slot = params.get("slot")
         if not slot:
             raise ValueError("Missing 'slot' parameter")
-        
+
         model = await self.model_manager.load_model(slot)
-        
+        # Release immediately — caller just wants the model loaded
+        await self.model_manager.release_model(slot)
+
         return {
             "slot": slot,
             "loaded": True,
@@ -476,36 +606,55 @@ class FastSearchDaemon:
                 "result": result,
                 "id": request_id,
             }).encode()
-        except Exception as e:
-            logger.exception(f"Error handling {method}")
+        except ValueError as e:
             return json.dumps({
                 "jsonrpc": "2.0",
-                "error": {"code": -32000, "message": str(e)},
+                "error": {"code": -32602, "message": str(e)},
+                "id": request_id,
+            }).encode()
+        except Exception as e:
+            logger.exception(f"Error handling {method}")
+            # Return generic message to client; details are in the daemon log
+            error_type = type(e).__name__
+            return json.dumps({
+                "jsonrpc": "2.0",
+                "error": {"code": -32000, "message": f"Internal error: {error_type}"},
                 "id": request_id,
             }).encode()
     
-    async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    async def _handle_client(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ):
         """Handle a client connection."""
         try:
             while True:
-                # Read length-prefixed message
-                length_bytes = await reader.readexactly(4)
+                # Read length prefix (idle timeout: 300s)
+                length_bytes = await asyncio.wait_for(
+                    reader.readexactly(4), timeout=300.0
+                )
                 length = int.from_bytes(length_bytes, "big")
-                
+
                 if length > 10 * 1024 * 1024:  # 10MB limit
                     logger.warning(f"Message too large: {length} bytes")
                     break
-                
-                data = await reader.readexactly(length)
+
+                # Read message body (data timeout: 30s)
+                data = await asyncio.wait_for(
+                    reader.readexactly(length), timeout=30.0
+                )
                 response = await self._handle_request(data)
-                
+
                 # Send length-prefixed response
                 writer.write(len(response).to_bytes(4, "big"))
                 writer.write(response)
                 await writer.drain()
-                
+
         except asyncio.IncompleteReadError:
             pass  # Client disconnected
+        except asyncio.TimeoutError:
+            logger.info("Client connection timed out")
         except Exception as e:
             logger.exception("Error handling client")
         finally:
@@ -515,10 +664,26 @@ class FastSearchDaemon:
     async def start(self, foreground: bool = True):
         """Start the daemon server."""
         socket_path = self.config.daemon.socket_path
-        
-        # Remove existing socket
-        if os.path.exists(socket_path):
+
+        # Check if a daemon is already running
+        pid_path = self.config.daemon.pid_path
+        try:
+            pid = int(Path(pid_path).read_text().strip())
+            os.kill(pid, 0)  # Check if process is alive
+            raise RuntimeError(
+                f"Daemon already running (PID {pid}). "
+                "Stop it first with 'vps-fastsearch daemon stop'."
+            )
+        except (FileNotFoundError, ValueError):
+            pass  # No PID file or invalid content
+        except ProcessLookupError:
+            pass  # Stale PID file, process is dead — proceed
+
+        # Remove existing socket (catch FileNotFoundError instead of TOCTOU check)
+        try:
             os.unlink(socket_path)
+        except FileNotFoundError:
+            pass
         
         # Create server
         self._server = await asyncio.start_unix_server(
@@ -532,8 +697,17 @@ class FastSearchDaemon:
         self._start_time = time.time()
         
         # Write PID file
-        pid_path = self.config.daemon.pid_path
-        Path(pid_path).write_text(str(os.getpid()))
+        # Remove any existing PID file first (don't follow symlinks)
+        try:
+            os.unlink(pid_path)
+        except FileNotFoundError:
+            pass
+        # Create PID file with exclusive creation to prevent symlink attacks
+        fd = os.open(pid_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        try:
+            os.write(fd, str(os.getpid()).encode())
+        finally:
+            os.close(fd)
         
         logger.info(f"VPS-FastSearch daemon started on {socket_path}")
         
@@ -542,6 +716,8 @@ class FastSearchDaemon:
             if model_config.keep_loaded == "always":
                 try:
                     await self.model_manager.load_model(slot)
+                    # Release the ref from pre-loading
+                    await self.model_manager.release_model(slot)
                 except Exception as e:
                     logger.error(f"Failed to load {slot}: {e}")
         
@@ -561,7 +737,12 @@ class FastSearchDaemon:
             await self._server.wait_closed()
         
         await self.model_manager.shutdown()
-        
+
+        # Close cached database connections
+        for db in self._db_cache.values():
+            db.close()
+        self._db_cache.clear()
+
         # Clean up socket and PID files
         socket_path = self.config.daemon.socket_path
         if os.path.exists(socket_path):
@@ -636,8 +817,19 @@ def stop_daemon(config_path: str | None = None) -> bool:
                 os.kill(pid, 0)  # Check if process exists
                 time.sleep(0.1)
             except ProcessLookupError:
-                break
-        
+                return True
+
+        # Process didn't exit after SIGTERM, escalate to SIGKILL
+        try:
+            logger.warning(f"Daemon (PID {pid}) didn't exit after SIGTERM, sending SIGKILL")
+            os.kill(pid, signal.SIGKILL)
+            time.sleep(0.5)
+        except ProcessLookupError:
+            pass
+
+        # Clean up stale PID file
+        if os.path.exists(pid_path):
+            os.unlink(pid_path)
         return True
     except (ValueError, ProcessLookupError):
         # Clean up stale PID file
@@ -655,28 +847,45 @@ def get_daemon_status(config_path: str | None = None) -> dict | None:
         return None
     
     # Try to connect and get status
+    sock = None
     try:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(2.0)
         sock.connect(socket_path)
-        
+
         request = json.dumps({
             "jsonrpc": "2.0",
             "method": "status",
             "params": {},
             "id": 1,
         }).encode()
-        
+
         sock.sendall(len(request).to_bytes(4, "big"))
         sock.sendall(request)
-        
-        length_bytes = sock.recv(4)
+
+        length_bytes = b""
+        while len(length_bytes) < 4:
+            chunk = sock.recv(4 - len(length_bytes))
+            if not chunk:
+                return None
+            length_bytes += chunk
+
         length = int.from_bytes(length_bytes, "big")
-        response = sock.recv(length)
-        
-        sock.close()
-        
+
+        response = b""
+        while len(response) < length:
+            chunk = sock.recv(min(8192, length - len(response)))
+            if not chunk:
+                return None
+            response += chunk
+
         result = json.loads(response)
         return result.get("result")
     except Exception:
         return None
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass

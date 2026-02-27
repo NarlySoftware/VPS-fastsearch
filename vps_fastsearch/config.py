@@ -13,10 +13,22 @@ except ImportError:
     HAS_YAML = False
 
 
-# Default paths
-DEFAULT_CONFIG_PATH = Path.home() / ".config" / "fastsearch" / "config.yaml"
-DEFAULT_SOCKET_PATH = "/tmp/fastsearch.sock"
-DEFAULT_PID_PATH = "/tmp/fastsearch.pid"
+# Default paths — respect XDG Base Directory specification
+_xdg_config = os.environ.get("XDG_CONFIG_HOME", os.path.join(Path.home(), ".config"))
+DEFAULT_CONFIG_PATH = Path(_xdg_config) / "fastsearch" / "config.yaml"
+
+_xdg_data = os.environ.get(
+    "XDG_DATA_HOME", os.path.join(Path.home(), ".local", "share")
+)
+DEFAULT_DB_PATH = os.path.join(_xdg_data, "fastsearch", "fastsearch.db")
+
+_xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
+if _xdg_runtime:
+    DEFAULT_SOCKET_PATH = os.path.join(_xdg_runtime, "fastsearch.sock")
+    DEFAULT_PID_PATH = os.path.join(_xdg_runtime, "fastsearch.pid")
+else:
+    DEFAULT_SOCKET_PATH = "/tmp/fastsearch.sock"
+    DEFAULT_PID_PATH = "/tmp/fastsearch.pid"
 
 
 @dataclass
@@ -107,7 +119,9 @@ class FastSearchConfig:
         content = path.read_text()
         
         if HAS_YAML:
-            data = yaml.safe_load(content) or {}
+            data = yaml.safe_load(content)
+            if not isinstance(data, dict):
+                data = {}
         else:
             # Simple fallback parser for basic YAML
             data = _simple_yaml_parse(content)

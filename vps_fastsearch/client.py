@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from .config import load_config, DEFAULT_SOCKET_PATH
+from .config import load_config, DEFAULT_DB_PATH, DEFAULT_SOCKET_PATH
 
 
 class FastSearchError(Exception):
@@ -22,14 +22,17 @@ class DaemonNotRunningError(FastSearchError):
 class FastSearchClient:
     """
     Python client for FastSearch daemon.
-    
+
     Usage:
         from vps_fastsearch import FastSearchClient
-        
+
         client = FastSearchClient()
         results = client.search("query")
         results = client.search("query", rerank=True)
         status = client.status()
+
+    Note: This class is NOT thread-safe. Use a separate instance per thread,
+    or synchronize access externally.
     """
     
     def __init__(
@@ -67,7 +70,7 @@ class FastSearchClient:
             self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self._sock.settimeout(self.timeout)
             self._sock.connect(self.socket_path)
-        except ConnectionRefusedError:
+        except (ConnectionRefusedError, FileNotFoundError):
             self._sock = None
             raise DaemonNotRunningError(f"Cannot connect to daemon at {self.socket_path}")
         except Exception as e:
@@ -85,50 +88,84 @@ class FastSearchClient:
     
     def _send_request(self, method: str, params: dict[str, Any] = None) -> dict[str, Any]:
         """Send JSON-RPC request and get response."""
-        self._connect()
-        
         request = {
             "jsonrpc": "2.0",
             "method": method,
             "params": params or {},
             "id": 1,
         }
-        
+
         data = json.dumps(request).encode()
-        
-        try:
-            # Send length-prefixed message
-            self._sock.sendall(len(data).to_bytes(4, "big"))
-            self._sock.sendall(data)
-            
-            # Receive length-prefixed response
-            length_bytes = self._sock.recv(4)
-            if not length_bytes:
-                raise FastSearchError("Connection closed by daemon")
-            
-            length = int.from_bytes(length_bytes, "big")
-            
-            # Receive full response
-            response_data = b""
-            while len(response_data) < length:
-                chunk = self._sock.recv(min(8192, length - len(response_data)))
-                if not chunk:
-                    raise FastSearchError("Connection closed while receiving response")
-                response_data += chunk
-            
-            response = json.loads(response_data.decode())
-            
-            if "error" in response:
-                error = response["error"]
-                raise FastSearchError(f"RPC error {error.get('code')}: {error.get('message')}")
-            
-            return response.get("result", {})
-            
-        except (BrokenPipeError, ConnectionResetError) as e:
-            self._disconnect()
-            raise FastSearchError(f"Connection lost: {e}")
-        except json.JSONDecodeError as e:
-            raise FastSearchError(f"Invalid response: {e}")
+
+        # Validate message size before sending
+        MAX_MESSAGE_SIZE = 10 * 1024 * 1024  # 10MB, matches daemon limit
+        if len(data) > MAX_MESSAGE_SIZE:
+            raise FastSearchError(f"Request too large: {len(data)} bytes (max 10MB)")
+
+        for attempt in range(2):
+            self._connect()
+            try:
+                # Send length-prefixed message
+                self._sock.sendall(len(data).to_bytes(4, "big"))
+                self._sock.sendall(data)
+
+                # Receive length-prefixed response
+                length_bytes = b""
+                while len(length_bytes) < 4:
+                    chunk = self._sock.recv(4 - len(length_bytes))
+                    if not chunk:
+                        raise FastSearchError("Connection closed by daemon")
+                    length_bytes += chunk
+
+                length = int.from_bytes(length_bytes, "big")
+
+                # Validate response size
+                if length > MAX_MESSAGE_SIZE:
+                    self._disconnect()
+                    raise FastSearchError(
+                        f"Response too large: {length} bytes (max 10MB)"
+                    )
+
+                # Receive full response
+                response_data = b""
+                while len(response_data) < length:
+                    chunk = self._sock.recv(min(8192, length - len(response_data)))
+                    if not chunk:
+                        raise FastSearchError(
+                            "Connection closed while receiving response"
+                        )
+                    response_data += chunk
+
+                response = json.loads(response_data.decode())
+
+                if not isinstance(response, dict):
+                    raise FastSearchError(
+                        f"Invalid JSON-RPC response: expected dict,"
+                        f" got {type(response).__name__}"
+                    )
+
+                if "error" in response:
+                    error = response["error"]
+                    raise FastSearchError(
+                        f"RPC error {error.get('code')}: {error.get('message')}"
+                    )
+
+                if "result" not in response:
+                    raise FastSearchError(
+                        "Invalid JSON-RPC response from daemon:"
+                        " missing 'result' and 'error'"
+                    )
+
+                return response.get("result", {})
+
+            except (OSError, socket.timeout) as e:
+                self._disconnect()
+                if attempt == 0:
+                    continue  # retry once after reconnect
+                raise FastSearchError(f"Connection lost: {e}")
+            except json.JSONDecodeError as e:
+                self._disconnect()
+                raise FastSearchError(f"Invalid response: {e}")
     
     def ping(self) -> bool:
         """Check if daemon is responding."""
@@ -155,7 +192,7 @@ class FastSearchClient:
     def search(
         self,
         query: str,
-        db_path: str = "fastsearch.db",
+        db_path: str | None = None,
         limit: int = 10,
         mode: str = "hybrid",
         rerank: bool = False,
@@ -178,6 +215,8 @@ class FastSearchClient:
             - search_time_ms: Search latency
             - results: List of result dicts
         """
+        if db_path is None:
+            db_path = os.environ.get("FASTSEARCH_DB", DEFAULT_DB_PATH)
         return self._send_request("search", {
             "query": query,
             "db_path": db_path,
@@ -291,10 +330,8 @@ class FastSearchClient:
             return False
         
         try:
-            client = FastSearchClient(socket_path=socket_path, timeout=2.0)
-            result = client.ping()
-            client.close()
-            return result
+            with FastSearchClient(socket_path=socket_path, timeout=2.0) as client:
+                return client.ping()
         except Exception:
             return False
 
@@ -303,35 +340,44 @@ class FastSearchClient:
 def search(query: str, **kwargs) -> list[dict]:
     """Quick search using daemon (falls back to direct if unavailable)."""
     try:
-        client = FastSearchClient(timeout=10.0)
-        result = client.search(query, **kwargs)
-        client.close()
-        return result.get("results", [])
-    except DaemonNotRunningError:
+        with FastSearchClient(timeout=10.0) as client:
+            result = client.search(query, **kwargs)
+            return result.get("results", [])
+    except (DaemonNotRunningError, FastSearchError):
         # Fall back to direct search
         from .core import SearchDB, get_embedder
-        
-        db_path = kwargs.get("db_path", "fastsearch.db")
+
+        db_path = kwargs.get("db_path", os.environ.get("FASTSEARCH_DB", DEFAULT_DB_PATH))
         limit = kwargs.get("limit", 10)
-        
+        mode = kwargs.get("mode", "hybrid")
+        rerank = kwargs.get("rerank", False)
+
         db = SearchDB(db_path)
-        embedder = get_embedder()
-        embedding = embedder.embed_single(query)
-        
-        results = db.search_hybrid(query, embedding, limit=limit)
-        db.close()
-        
+        try:
+            if mode == "bm25":
+                results = db.search_bm25(query, limit=limit)
+            else:
+                embedder = get_embedder()
+                embedding = embedder.embed_single(query)
+                if rerank:
+                    results = db.search_hybrid_reranked(
+                        query, embedding, limit=limit
+                    )
+                else:
+                    results = db.search_hybrid(query, embedding, limit=limit)
+        finally:
+            db.close()
+
         return results
 
 
 def embed(texts: list[str]) -> list[list[float]]:
     """Quick embed using daemon (falls back to direct if unavailable)."""
     try:
-        client = FastSearchClient(timeout=10.0)
-        result = client.embed(texts)
-        client.close()
-        return result.get("embeddings", [])
-    except DaemonNotRunningError:
+        with FastSearchClient(timeout=10.0) as client:
+            result = client.embed(texts)
+            return result.get("embeddings", [])
+    except (DaemonNotRunningError, FastSearchError):
         from .core import get_embedder
         embedder = get_embedder()
         return embedder.embed(texts)

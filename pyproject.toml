@@ -37,15 +37,16 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Text Processing :: Indexing",
     "Topic :: Database :: Database Engines/Servers",
     "Typing :: Typed"
 ]
 dependencies = [
-    "fastembed>=0.4.0",
-    "sqlite-vec>=0.1.1",
-    "apsw>=3.45",
+    "fastembed>=0.4.0,<1.0",
+    "sqlite-vec>=0.1.6,<1.0",
+    "apsw>=3.45,<4.0",
     "click>=8.0",
     "orjson>=3.9",
     "psutil>=5.9",
@@ -54,10 +55,10 @@ dependencies = [
 
 [project.optional-dependencies]
 rerank = [
-    "sentence-transformers>=2.2.0",
+    "sentence-transformers>=2.2.0,<4.0",
 ]
 all = [
-    "sentence-transformers>=2.2.0",
+    "sentence-transformers>=2.2.0,<4.0",
 ]
 dev = [
     "pytest>=7.0",
@@ -94,11 +95,11 @@ include = [
 
 [tool.black]
 line-length = 100
-target-version = ["py310", "py311", "py312"]
+target-version = ["py310", "py311", "py312", "py313"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py313"
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -113,7 +114,7 @@ ignore = [
 ]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.13"
 warn_return_any = true
 warn_unused_ignores = true
 disallow_untyped_defs = true
