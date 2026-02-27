@@ -19,7 +19,7 @@ echo ""
 echo "[1/8] Installing Python 3.13 and dependencies..."
 
 sudo apt-get update -qq
-sudo apt-get install -y python3.13 python3.13-venv python3.13-dev python3-full
+sudo apt-get install -y python3.13 python3.13-venv python3.13-dev python3-full build-essential libsqlite3-dev
 echo "  Python 3.13 ready: $(python3.13 --version)"
 
 # ---- Step 2: Create virtual environment ----
@@ -89,6 +89,12 @@ else
     exit 1
 fi
 
+# ---- Step 7b: Pre-download embedding model ----
+echo "[7b/8] Pre-downloading embedding model..."
+"$VENV_DIR/bin/python" -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-base-en-v1.5')" && \
+    echo "  Model downloaded successfully" || \
+    echo "  WARNING: Model download failed. It will be downloaded on first use."
+
 # ---- Step 8: Install systemd user service ----
 echo "[8/8] Installing systemd user service..."
 
@@ -124,9 +130,13 @@ echo ""
 
 # Add ~/.local/bin to PATH if not already there
 if [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; then
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-    echo "  Added ~/.local/bin to PATH in ~/.bashrc"
-    echo "  Run: source ~/.bashrc (or open a new terminal)"
+    SHELL_RC="$HOME/.bashrc"
+    if [ -n "$ZSH_VERSION" ] || [[ "$SHELL" == */zsh ]]; then
+        SHELL_RC="$HOME/.zshrc"
+    fi
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
+    echo "  Added ~/.local/bin to PATH in $SHELL_RC"
+    echo "  Run: source $SHELL_RC (or open a new terminal)"
     echo ""
 fi
 

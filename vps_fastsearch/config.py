@@ -1,9 +1,12 @@
 """VPS-FastSearch configuration system with YAML support."""
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
+
+logger = logging.getLogger(__name__)
 
 # Try to import yaml, fall back to simple parsing
 try:
@@ -37,6 +40,7 @@ class ModelConfig:
     name: str
     keep_loaded: Literal["always", "on_demand", "never"] = "on_demand"
     idle_timeout_seconds: int = 300
+    threads: int = 2
 
 
 @dataclass
@@ -94,15 +98,28 @@ class FastSearchConfig:
         models = {}
         for name, model_data in data.get("models", {}).items():
             if isinstance(model_data, dict):
+                keep_loaded = model_data.get("keep_loaded", "on_demand")
+                if keep_loaded not in ("always", "on_demand", "never"):
+                    logger.warning(f"Invalid keep_loaded: {keep_loaded!r}, using default 'on_demand'")
+                    keep_loaded = "on_demand"
+                idle_timeout = model_data.get("idle_timeout_seconds", 300)
+                if not isinstance(idle_timeout, (int, float)) or idle_timeout < 0:
+                    logger.warning(f"Invalid idle_timeout_seconds: {idle_timeout!r}, using default 300")
+                    idle_timeout = 300
                 models[name] = ModelConfig(
                     name=model_data.get("name", ""),
-                    keep_loaded=model_data.get("keep_loaded", "on_demand"),
-                    idle_timeout_seconds=model_data.get("idle_timeout_seconds", 300),
+                    keep_loaded=keep_loaded,
+                    idle_timeout_seconds=idle_timeout,
+                    threads=model_data.get("threads", 2),
                 )
-        
+
         memory_data = data.get("memory", {})
+        max_ram = memory_data.get("max_ram_mb", 4000)
+        if not isinstance(max_ram, (int, float)) or max_ram <= 0:
+            logger.warning(f"Invalid max_ram_mb: {max_ram!r}, using default 4000")
+            max_ram = 4000
         memory = MemoryConfig(
-            max_ram_mb=memory_data.get("max_ram_mb", 4000),
+            max_ram_mb=max_ram,
             eviction_policy=memory_data.get("eviction_policy", "lru"),
         )
         
@@ -119,7 +136,11 @@ class FastSearchConfig:
         content = path.read_text()
         
         if HAS_YAML:
-            data = yaml.safe_load(content)
+            try:
+                data = yaml.safe_load(content)
+            except yaml.YAMLError as e:
+                logger.warning(f"Config file has syntax errors, using defaults: {e}")
+                data = {}
             if not isinstance(data, dict):
                 data = {}
         else:
@@ -151,6 +172,7 @@ class FastSearchConfig:
                     "name": model.name,
                     "keep_loaded": model.keep_loaded,
                     "idle_timeout_seconds": model.idle_timeout_seconds,
+                    "threads": model.threads,
                 }
                 for name, model in self.models.items()
             },
@@ -220,8 +242,10 @@ def _parse_value(value: str) -> Any:
         return True
     elif value.lower() == "false":
         return False
-    elif value.isdigit():
+    try:
         return int(value)
+    except ValueError:
+        pass
     try:
         return float(value)
     except ValueError:
@@ -254,6 +278,8 @@ def load_config(path: Path | str | None = None) -> FastSearchConfig:
     4. Default configuration
     """
     if path is not None:
+        if not Path(path).exists():
+            raise FileNotFoundError(f"Config file not found: {path}")
         return FastSearchConfig.from_yaml(path)
     
     env_path = os.environ.get("FASTSEARCH_CONFIG")

@@ -45,12 +45,13 @@ classifiers = [
 ]
 dependencies = [
     "fastembed>=0.4.0,<1.0",
+    "onnxruntime>=1.20",
     "sqlite-vec>=0.1.6,<1.0",
     "apsw>=3.45,<4.0",
     "click>=8.0",
-    "orjson>=3.9",
-    "psutil>=5.9",
-    "pyyaml>=6.0",
+    "orjson>=3.9,<4.0",
+    "psutil>=5.9,<7.0",
+    "pyyaml>=6.0,<7.0",
 ]
 
 [project.optional-dependencies]
@@ -88,9 +89,17 @@ packages = ["vps_fastsearch"]
 include = [
     "vps_fastsearch/",
     "docs/",
+    "tests/",
     "README.md",
     "LICENSE",
     "pyproject.toml",
+    "install.sh",
+    "config.yaml.example",
+    "vps-fastsearch.service",
+    "INSTALL_GUIDE.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "run_tests.py",
 ]
 
 [tool.black]

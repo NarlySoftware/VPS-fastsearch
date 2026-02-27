@@ -70,9 +70,9 @@ vps-fastsearch daemon status
 To start the daemon automatically on boot, install the systemd service:
 
 ```bash
-sudo cp ~/fastsearch/fastsearch.service /etc/systemd/system/
+sudo cp ~/fastsearch/vps-fastsearch.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now fastsearch
+sudo systemctl enable --now vps-fastsearch
 ```
 
 **Note:** Edit the service file first if you're not running as a `fastsearch` user — change `User=` and `ExecStart=` paths to match your setup.

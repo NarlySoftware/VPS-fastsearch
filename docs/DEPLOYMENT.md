@@ -35,7 +35,7 @@ This guide covers deploying VPS-FastSearch in production environments, including
 sudo apt update && sudo apt upgrade -y
 
 # Install Python and build tools
-sudo apt install -y python3.11 python3.11-venv python3-pip build-essential
+sudo apt install -y python3.13 python3.13-venv build-essential
 
 # Create fastsearch user
 sudo useradd -r -m -s /bin/bash fastsearch
@@ -62,7 +62,7 @@ sudo -u fastsearch -i
 
 # Create virtual environment
 cd /opt/fastsearch
-python3.11 -m venv venv
+python3.13 -m venv venv
 source venv/bin/activate
 
 # Install VPS-FastSearch
@@ -140,7 +140,8 @@ RuntimeDirectoryMode=0755
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=true
+# ProtectHome=false required: fastembed caches models in ~/.cache/fastembed/
+ProtectHome=false
 PrivateTmp=true
 ReadWritePaths=/var/lib/fastsearch /var/log/fastsearch /run/fastsearch
 
@@ -444,7 +445,7 @@ sudo systemctl stop fastsearch
 
 # Create new venv (optional, safer)
 sudo -u fastsearch mv /opt/fastsearch/venv /opt/fastsearch/venv.bak
-sudo -u fastsearch python3.11 -m venv /opt/fastsearch/venv
+sudo -u fastsearch python3.13 -m venv /opt/fastsearch/venv
 sudo -u fastsearch /opt/fastsearch/venv/bin/pip install "vps-fastsearch[rerank]"
 
 # Test

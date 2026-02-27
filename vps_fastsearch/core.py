@@ -1,9 +1,12 @@
 """Core classes for VPS-FastSearch: Embedder, Reranker, and SearchDB."""
 
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import apsw
 import orjson
@@ -26,9 +29,19 @@ class Embedder:
     
     def __init__(self, model_name: str | None = None):
         from fastembed import TextEmbedding
-        
+
         self.model_name = model_name or self.MODEL_NAME
-        self._model = TextEmbedding(self.model_name, threads=2)
+        logger.info(f"Loading embedding model {self.model_name} (first run may download ~130MB)")
+        try:
+            self._model = TextEmbedding(self.model_name, threads=2)
+        except Exception as e:
+            if "connection" in str(e).lower() or "timeout" in str(e).lower():
+                logger.warning(f"Model download failed, retrying: {e}")
+                import time
+                time.sleep(3)
+                self._model = TextEmbedding(self.model_name, threads=2)
+            else:
+                raise
     
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a list of texts."""
@@ -70,7 +83,17 @@ class Reranker:
             )
 
         self.model_name = model_name or self.MODEL_NAME
-        self._model = CrossEncoder(self.model_name)
+        logger.info(f"Loading reranker model {self.model_name} (first run may download ~80MB)")
+        try:
+            self._model = CrossEncoder(self.model_name)
+        except Exception as e:
+            if "connection" in str(e).lower() or "timeout" in str(e).lower():
+                logger.warning(f"Model download failed, retrying: {e}")
+                import time
+                time.sleep(3)
+                self._model = CrossEncoder(self.model_name)
+            else:
+                raise
     
     def rerank(self, query: str, documents: list[str]) -> list[float]:
         """
@@ -149,9 +172,18 @@ class SearchDB:
         self.conn.enableloadextension(False)
 
         # Enable WAL mode for concurrent read/write access
-        self._execute("PRAGMA journal_mode=WAL")
+        result = list(self._execute("PRAGMA journal_mode=WAL"))
+        if result and result[0][0].lower() != "wal":
+            logger.warning(f"WAL mode not available (got {result[0][0]}). Performance may be degraded on network/FUSE filesystems.")
         # Wait up to 5 seconds if database is locked
         self._execute("PRAGMA busy_timeout=5000")
+
+        # Lightweight corruption check
+        try:
+            list(self._execute("PRAGMA quick_check(1)"))
+        except Exception as e:
+            logger.error(f"Database may be corrupted: {e}. Consider deleting {self.db_path} and re-indexing.")
+            raise
 
         self._init_schema()
     

@@ -109,7 +109,7 @@ class ModelManager:
         if slot == "embedder":
             from fastembed import TextEmbedding
             # Limit ONNX threads to reduce arena memory allocation
-            instance = TextEmbedding(model_config.name, threads=2)
+            instance = TextEmbedding(model_config.name, threads=model_config.threads)
         elif slot == "reranker":
             from sentence_transformers import CrossEncoder
             instance = CrossEncoder(model_config.name)
@@ -670,21 +670,38 @@ class FastSearchDaemon:
         try:
             pid = int(Path(pid_path).read_text().strip())
             os.kill(pid, 0)  # Check if process is alive
-            raise RuntimeError(
-                f"Daemon already running (PID {pid}). "
-                "Stop it first with 'vps-fastsearch daemon stop'."
+            # Verify the process is actually a fastsearch daemon (PID reuse guard)
+            is_fastsearch = False
+            try:
+                cmdline = Path(f"/proc/{pid}/cmdline").read_text()
+                is_fastsearch = "fastsearch" in cmdline
+            except (FileNotFoundError, PermissionError):
+                # /proc not available (e.g. macOS) or no permission — assume running
+                is_fastsearch = True
+            if is_fastsearch:
+                raise RuntimeError(
+                    f"Daemon already running (PID {pid}). "
+                    "Stop it first with 'vps-fastsearch daemon stop'."
+                )
+            # PID reused by a different process — treat PID file as stale
+            logger.warning(
+                f"Stale PID file: process {pid} exists but is not fastsearch"
             )
         except (FileNotFoundError, ValueError):
             pass  # No PID file or invalid content
         except ProcessLookupError:
             pass  # Stale PID file, process is dead — proceed
 
+        # Warn if XDG_RUNTIME_DIR is not set
+        if not os.environ.get("XDG_RUNTIME_DIR"):
+            logger.warning("XDG_RUNTIME_DIR not set; using /tmp for socket and PID file")
+
         # Remove existing socket (catch FileNotFoundError instead of TOCTOU check)
         try:
             os.unlink(socket_path)
         except FileNotFoundError:
             pass
-        
+
         # Create server
         self._server = await asyncio.start_unix_server(
             self._handle_client,
@@ -777,9 +794,11 @@ def run_daemon(config_path: str | None = None, foreground: bool = True, detach: 
         os.setsid()
         
         # Redirect stdio
-        sys.stdin = open(os.devnull, 'r')
-        sys.stdout = open(os.devnull, 'w')
-        sys.stderr = open(os.devnull, 'w')
+        devnull = os.open(os.devnull, os.O_RDWR)
+        os.dup2(devnull, 0)
+        os.dup2(devnull, 1)
+        os.dup2(devnull, 2)
+        os.close(devnull)
     
     daemon = FastSearchDaemon(config)
     
@@ -790,7 +809,7 @@ def run_daemon(config_path: str | None = None, foreground: bool = True, detach: 
     def signal_handler():
         daemon._shutdown_event.set()
     
-    for sig in (signal.SIGTERM, signal.SIGINT):
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         loop.add_signal_handler(sig, signal_handler)
     
     try:

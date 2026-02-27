@@ -11,9 +11,11 @@ from .chunker import chunk_markdown, chunk_text
 from .core import SearchDB, get_embedder
 from .config import load_config, create_default_config, DEFAULT_CONFIG_PATH, DEFAULT_DB_PATH
 from .client import FastSearchClient, DaemonNotRunningError
+from . import __version__
 
 
 @click.group()
+@click.version_option(version=__version__, prog_name="vps-fastsearch")
 @click.option("--db", default=DEFAULT_DB_PATH, help="Database path", envvar="FASTSEARCH_DB")
 @click.option("--config", "config_path", default=None, help="Config file path", envvar="FASTSEARCH_CONFIG")
 @click.pass_context
@@ -319,6 +321,9 @@ def search(ctx, query, limit, mode, rerank, no_daemon, output_json):
         client.close()
     else:
         # Direct search
+        if not Path(db_path).exists():
+            click.echo("Database not found. Run 'vps-fastsearch index <path>' first.", err=True)
+            sys.exit(1)
         db = SearchDB(db_path)
         
         if mode == "bm25":

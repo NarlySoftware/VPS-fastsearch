@@ -5,7 +5,7 @@ from .chunker import chunk_text, chunk_markdown
 from .client import FastSearchClient, DaemonNotRunningError, search, embed
 from .config import FastSearchConfig, load_config, create_default_config
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 __all__ = [
     # Core classes
     "Embedder",

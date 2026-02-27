@@ -8,7 +8,6 @@ Type=simple
 
 # Main executable (install.sh puts venv in ~/fastsearch/.venv)
 ExecStart=%h/fastsearch/.venv/bin/vps-fastsearch daemon start
-ExecStop=%h/fastsearch/.venv/bin/vps-fastsearch daemon stop
 ExecReload=%h/fastsearch/.venv/bin/vps-fastsearch daemon reload
 
 # Environment (install.sh puts config in ~/.config/fastsearch/)
