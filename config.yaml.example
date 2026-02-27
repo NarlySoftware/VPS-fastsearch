@@ -1,0 +1,21 @@
+# VPS-FastSearch Configuration
+# Copy to ~/.config/fastsearch/config.yaml
+
+daemon:
+  socket_path: /tmp/fastsearch.sock
+  log_level: INFO
+
+models:
+  embedder:
+    name: "BAAI/bge-base-en-v1.5"
+    keep_loaded: always        # always | on_demand | never
+    idle_timeout_seconds: 0
+
+  reranker:
+    name: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    keep_loaded: on_demand
+    idle_timeout_seconds: 300  # Unload after 5 min idle
+
+memory:
+  max_ram_mb: 4000
+  eviction_policy: lru         # lru | fifo
