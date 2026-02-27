@@ -1,8 +1,41 @@
 # VPS-FastSearch Installation & Setup Guide
 
-## 1. Install
+## Quick Install (Debian 13)
 
-The VPS-FastSearch tarball is at `~/vps-fastsearch-0.2.0.tar.gz`. Extract it and run the installer:
+### Prerequisites
+
+```bash
+sudo apt update
+sudo apt install -y git
+```
+
+### Install
+
+```bash
+git clone https://github.com/NarlySoftware/VPS-fastsearch.git ~/fastsearch
+cd ~/fastsearch
+./install.sh
+source ~/.bashrc
+```
+
+### Verify
+
+```bash
+vps-fastsearch --help
+```
+
+### Slow Connection?
+
+If pip times out downloading onnxruntime (~146MB), install it separately first:
+
+```bash
+~/fastsearch/.venv/bin/pip install --timeout 300 onnxruntime
+./install.sh
+```
+
+## Alternative: Install from Tarball
+
+If you have the VPS-FastSearch tarball instead of using git:
 
 ```bash
 cd ~
@@ -11,12 +44,6 @@ mv vps-fastsearch-0.2.0 fastsearch
 cd ~/fastsearch
 chmod +x install.sh
 ./install.sh
-```
-
-After install, add `~/.local/bin` to your PATH if it isn't already:
-
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 

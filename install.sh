@@ -16,16 +16,11 @@ echo "=== VPS-FastSearch Installer ==="
 echo ""
 
 # ---- Step 1: Ensure Python 3.13 is available ----
-echo "[1/7] Checking for Python 3.13..."
+echo "[1/7] Installing Python 3.13 and dependencies..."
 
-if command -v python3.13 &> /dev/null; then
-    echo "  Found python3.13 at $(command -v python3.13)"
-else
-    echo "  Python 3.13 not found. Installing..."
-    sudo apt-get update -qq
-    sudo apt-get install -y python3.13 python3.13-venv python3.13-dev
-    echo "  Python 3.13 installed: $(python3.13 --version)"
-fi
+sudo apt-get update -qq
+sudo apt-get install -y python3.13 python3.13-venv python3.13-dev python3-full
+echo "  Python 3.13 ready: $(python3.13 --version)"
 
 # ---- Step 2: Create virtual environment ----
 echo "[2/7] Setting up virtual environment..."
@@ -43,7 +38,7 @@ fi
 # ---- Step 3: Install VPS-FastSearch ----
 echo "[3/7] Installing VPS-FastSearch..."
 
-"$VENV_DIR/bin/pip" install "$INSTALL_DIR[all]" --quiet
+"$VENV_DIR/bin/pip" install --timeout 120 "$INSTALL_DIR[all]" --quiet
 echo "  Installed vps-fastsearch with all extras"
 
 # ---- Step 4: Verify native extensions ----
@@ -104,11 +99,11 @@ echo "  CLI:          $LOCAL_BIN/vps-fastsearch"
 echo "  Config:       $CONFIG_DIR/config.yaml"
 echo ""
 
-# Check if ~/.local/bin is on PATH
+# Add ~/.local/bin to PATH if not already there
 if [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; then
-    echo "NOTE: Add ~/.local/bin to your PATH:"
-    echo '  echo '\''export PATH="$HOME/.local/bin:$PATH"'\'' >> ~/.bashrc'
-    echo '  source ~/.bashrc'
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+    echo "  Added ~/.local/bin to PATH in ~/.bashrc"
+    echo "  Run: source ~/.bashrc (or open a new terminal)"
     echo ""
 fi
 

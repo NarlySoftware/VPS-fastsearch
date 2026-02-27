@@ -19,7 +19,17 @@ VPS-FastSearch combines BM25 full-text search with vector similarity search usin
 
 ## Quick Start
 
-### Installation
+### Installation (Debian 13)
+
+```bash
+sudo apt update && sudo apt install -y git
+git clone https://github.com/NarlySoftware/VPS-fastsearch.git ~/fastsearch
+cd ~/fastsearch
+./install.sh
+source ~/.bashrc
+```
+
+### Installation (pip)
 
 ```bash
 # Basic installation
@@ -28,11 +38,13 @@ pip install vps-fastsearch
 # With reranking support
 pip install "vps-fastsearch[rerank]"
 
-# From source
-git clone https://github.com/NarlySoftware/VPS-fastsearch
+# From source (development)
+git clone https://github.com/NarlySoftware/VPS-fastsearch.git
 cd VPS-fastsearch
 pip install -e ".[all]"
 ```
+
+See [INSTALL_GUIDE.md](INSTALL_GUIDE.md) for the full setup walkthrough.
 
 ### Index Documents
 
