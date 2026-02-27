@@ -22,11 +22,10 @@ def test_from_dict_roundtrip():
 
 
 def test_load_config_nonexistent_path():
-    """Loading from a nonexistent path should return defaults."""
-    config = load_config("/tmp/nonexistent_fastsearch_config_xyz_12345.yaml")
-    default = FastSearchConfig.default()
-    assert config.daemon.socket_path == default.daemon.socket_path
-    assert "embedder" in config.models
+    """Loading from an explicit nonexistent path should raise FileNotFoundError."""
+    import pytest
+    with pytest.raises(FileNotFoundError):
+        load_config("/tmp/nonexistent_fastsearch_config_xyz_12345.yaml")
 
 
 def test_to_yaml_produces_valid_output():
