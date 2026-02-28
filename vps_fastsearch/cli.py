@@ -637,10 +637,7 @@ def delete(ctx: click.Context, source: str | None, doc_id: int | None) -> None:
         assert source is not None  # for type checker
 
         # Support partial match
-        cursor = db._execute(
-            "SELECT DISTINCT source FROM docs WHERE source LIKE ?", (f"%{source}%",)
-        )
-        matches = [row[0] for row in cursor]
+        matches = db.find_sources(source)
 
         if not matches:
             click.echo(f"No sources matching '{source}'", err=True)

@@ -322,8 +322,8 @@ class FastSearchClient:
 
     def batch_index(
         self,
-        db_path: str,
         documents: list[dict[str, Any]],
+        db_path: str | None = None,
     ) -> dict[str, Any]:
         """
         Batch index documents into the database.
@@ -351,6 +351,8 @@ class FastSearchClient:
         Raises:
             FastSearchError: On indexing failure or connection loss after 2 attempts
         """
+        if db_path is None:
+            db_path = os.environ.get("FASTSEARCH_DB", DEFAULT_DB_PATH)
         return self._send_request(
             "batch_index",
             {

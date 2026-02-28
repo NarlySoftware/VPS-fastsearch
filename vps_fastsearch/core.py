@@ -432,6 +432,25 @@ class SearchDB:
             )
             self._execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
+    def find_sources(self, pattern: str) -> list[str]:
+        """Find sources matching a partial name pattern (LIKE query).
+
+        LIKE wildcards (``%`` and ``_``) in *pattern* are escaped so they
+        are matched literally.
+
+        Args:
+            pattern: Substring to search for in source names.
+
+        Returns:
+            List of distinct source strings that contain *pattern*.
+        """
+        escaped = pattern.replace("%", r"\%").replace("_", r"\_")
+        cursor = self._execute(
+            "SELECT DISTINCT source FROM docs WHERE source LIKE ? ESCAPE '\\'",
+            (f"%{escaped}%",),
+        )
+        return [row[0] for row in cursor]
+
     def index_document(
         self,
         source: str,
@@ -445,6 +464,8 @@ class SearchDB:
 
         Returns the document ID.
         """
+        if chunk_index < 0:
+            raise ValueError(f"chunk_index must be non-negative, got {chunk_index}")
         if len(embedding) != self.EMBEDDING_DIM:
             raise ValueError(f"Expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}")
         self.conn.execute("BEGIN")
@@ -488,7 +509,9 @@ class SearchDB:
         Each item is (source, chunk_index, content, embedding, metadata).
         Returns list of document IDs.
         """
-        for i, (_, _, _, embedding, _) in enumerate(items):
+        for i, (_, chunk_index, _, embedding, _) in enumerate(items):
+            if chunk_index < 0:
+                raise ValueError(f"Item {i}: chunk_index must be non-negative, got {chunk_index}")
             if len(embedding) != self.EMBEDDING_DIM:
                 raise ValueError(
                     f"Item {i}: expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}"

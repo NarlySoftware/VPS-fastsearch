@@ -677,8 +677,12 @@ class FastSearchDaemon:
                 raise ValueError(f"Document at index {i}: 'source' must be a non-empty string")
             if not isinstance(doc["chunk_index"], int):
                 raise ValueError(f"Document at index {i}: 'chunk_index' must be an integer")
+            if doc["chunk_index"] < 0:
+                raise ValueError(f"Document at index {i}: 'chunk_index' must be non-negative")
             if not isinstance(doc["content"], str):
                 raise ValueError(f"Document at index {i}: 'content' must be a string")
+            if not doc["content"]:
+                raise ValueError(f"Document at index {i}: 'content' must not be empty")
             if not isinstance(doc["embedding"], list):
                 raise ValueError(f"Document at index {i}: 'embedding' must be a list of floats")
 
@@ -921,7 +925,7 @@ class FastSearchDaemon:
                     error_response = orjson.dumps(
                         {
                             "jsonrpc": "2.0",
-                            "error": {"code": -32000, "message": "Rate limited"},
+                            "error": {"code": -32001, "message": "Rate limited"},
                             "id": None,
                         }
                     )
