@@ -95,12 +95,11 @@ if spec and spec.origin:
 
     if [ -n "$VEC_SO" ] && [ -f "$VEC_SO" ] && file "$VEC_SO" | grep -q "ELF 32-bit"; then
         echo "  Detected 32-bit vec0.so on ARM64 — rebuilding from source..."
-        BUILD_DIR="/tmp/sqlite-vec-build"
-        rm -rf "$BUILD_DIR"
+        BUILD_DIR=$(mktemp -d /tmp/sqlite-vec-build.XXXXXX)
+        trap "rm -rf '$BUILD_DIR'" EXIT
         git clone --depth 1 --branch v0.1.6 https://github.com/asg017/sqlite-vec.git "$BUILD_DIR"
         (cd "$BUILD_DIR" && make loadable)
         cp "$BUILD_DIR/dist/vec0.so" "$VEC_SO"
-        rm -rf "$BUILD_DIR"
         echo "  Replaced vec0.so with native ARM64 build"
         # Re-verify after rebuild
         if "$VENV_DIR/bin/python" -c "import sqlite_vec" 2>/dev/null; then

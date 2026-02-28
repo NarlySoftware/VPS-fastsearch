@@ -659,17 +659,18 @@ class SearchDB:
 
     def delete_source(self, source: str) -> int:
         """Delete all chunks from a source. Returns count deleted."""
-        # Get IDs to delete from vector table
-        ids = [row[0] for row in self._execute(
-            "SELECT id FROM docs WHERE source = ?", (source,)
-        )]
-        
-        if ids:
+        count = list(self._execute(
+            "SELECT COUNT(*) FROM docs WHERE source = ?", (source,)
+        ))[0][0]
+
+        if count:
             self.conn.execute("BEGIN")
             try:
-                # Delete from vector table
-                for doc_id in ids:
-                    self._execute("DELETE FROM docs_vec WHERE id = ?", (doc_id,))
+                # Delete from vector table via subquery (must precede docs DELETE)
+                self._execute(
+                    "DELETE FROM docs_vec WHERE id IN (SELECT id FROM docs WHERE source = ?)",
+                    (source,),
+                )
                 # Delete from docs (triggers handle FTS)
                 self._execute("DELETE FROM docs WHERE source = ?", (source,))
                 self.conn.execute("COMMIT")
@@ -680,7 +681,7 @@ class SearchDB:
                     pass  # ROLLBACK can fail if disk is full
                 raise
 
-        return len(ids)
+        return count
     
     def get_stats(self) -> dict[str, Any]:
         """Get database statistics."""

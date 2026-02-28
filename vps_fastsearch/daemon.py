@@ -1,6 +1,7 @@
 """VPS-FastSearch daemon with Unix socket server and model management."""
 
 import asyncio
+import atexit
 import json
 import logging
 import os
@@ -430,12 +431,14 @@ class FastSearchDaemon:
     async def _handle_search(self, params: dict) -> dict:
         """Handle search request."""
         query = params.get("query")
-        if not query:
-            raise ValueError("Missing 'query' parameter")
+        if not isinstance(query, str) or not query:
+            raise ValueError("Missing or invalid 'query' parameter (must be non-empty string)")
 
         db_path = params.get("db_path", DEFAULT_DB_PATH)
         limit = params.get("limit", 10)
         mode = params.get("mode", "hybrid")
+        if mode not in ("bm25", "vector", "hybrid"):
+            raise ValueError(f"Invalid mode: {mode!r}, must be 'bm25', 'vector', or 'hybrid'")
         rerank = params.get("rerank", False)
 
         # Get or load embedder
@@ -634,10 +637,22 @@ class FastSearchDaemon:
 
         request_id = request.get("id")
         method = request.get("method")
+        if not isinstance(method, str):
+            return orjson.dumps({
+                "jsonrpc": "2.0",
+                "error": {"code": -32600, "message": "method must be a string"},
+                "id": request_id,
+            })
         params = request.get("params", {})
-        
+        if not isinstance(params, dict):
+            return orjson.dumps({
+                "jsonrpc": "2.0",
+                "error": {"code": -32602, "message": "params must be an object"},
+                "id": request_id,
+            })
+
         self._request_count += 1
-        
+
         if method not in self._handlers:
             return orjson.dumps({
                 "jsonrpc": "2.0",
@@ -783,14 +798,15 @@ class FastSearchDaemon:
         except FileNotFoundError:
             pass
 
-        # Create server
-        self._server = await asyncio.start_unix_server(
-            self._handle_client,
-            path=socket_path,
-        )
-        
-        # Set socket permissions
-        os.chmod(socket_path, 0o600)
+        # Create server with restrictive umask to avoid world-accessible window
+        old_umask = os.umask(0o177)
+        try:
+            self._server = await asyncio.start_unix_server(
+                self._handle_client,
+                path=socket_path,
+            )
+        finally:
+            os.umask(old_umask)
         
         self._start_time = time.time()
         
@@ -809,7 +825,7 @@ class FastSearchDaemon:
         
         logger.info(f"VPS-FastSearch daemon started on {socket_path}")
         
-        # Pre-load "always" models
+        # Pre-load "always" models (fail fast if required models can't load)
         for slot, model_config in self.config.models.items():
             if model_config.keep_loaded == "always":
                 try:
@@ -817,7 +833,10 @@ class FastSearchDaemon:
                     # Release the ref from pre-loading
                     await self.model_manager.release_model(slot)
                 except Exception as e:
-                    logger.error(f"Failed to load {slot}: {e}")
+                    logger.error(f"Failed to pre-load required model {slot}: {e}")
+                    raise RuntimeError(
+                        f"Cannot start daemon: required model '{slot}' failed to load"
+                    ) from e
         
         if foreground:
             try:
@@ -943,16 +962,32 @@ def run_daemon(config_path: str | None = None, foreground: bool = True, detach: 
             os.close(devnull)
     
     daemon = FastSearchDaemon(config)
-    
+
+    # Register atexit handler to checkpoint/close DBs on non-SIGKILL exits
+    def cleanup():
+        for db in daemon._db_cache.values():
+            try:
+                db.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                db.close()
+            except Exception:
+                pass
+
+    atexit.register(cleanup)
+
     # Handle signals
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     def signal_handler():
         daemon._shutdown_event.set()
-    
-    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-        loop.add_signal_handler(sig, signal_handler)
+
+    def sighup_handler():
+        logger.info("SIGHUP received, reloading configuration")
+        asyncio.ensure_future(daemon._handle_reload_config({}))
+
+    loop.add_signal_handler(signal.SIGTERM, signal_handler)
+    loop.add_signal_handler(signal.SIGINT, signal_handler)
+    loop.add_signal_handler(signal.SIGHUP, sighup_handler)
     
     try:
         loop.run_until_complete(daemon.start(foreground=True))
