@@ -14,9 +14,6 @@ ExecReload=%h/venv/bin/vps-fastsearch daemon reload
 Environment="FASTSEARCH_CONFIG=%h/.config/fastsearch/config.yaml"
 Environment="FASTSEARCH_DB=%h/.local/share/fastsearch/fastsearch.db"
 
-# Working directory
-WorkingDirectory=%h/fastsearch
-
 # Restart policy
 Restart=always
 RestartSec=5

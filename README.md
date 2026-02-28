@@ -59,6 +59,26 @@ vps-fastsearch index ./docs --glob "*.md"
 vps-fastsearch index ./docs --reindex
 ```
 
+### Incremental Indexing
+
+Use `--reindex` when re-indexing files that have already been indexed. Without it,
+new chunks are appended alongside existing ones for the same source, leading to
+duplicates. With `--reindex`, existing chunks for each source are replaced.
+
+```bash
+# First time — indexes normally
+vps-fastsearch index ./docs --glob "*.md"
+
+# File changed — use --reindex to replace old chunks
+vps-fastsearch index ./docs/updated-file.md --reindex
+
+# Remove a deleted file from the index
+vps-fastsearch delete --source docs/old-file.md
+```
+
+For a complete automated workflow that tracks file changes and handles deletions,
+see [`examples/incremental_indexer.py`](examples/incremental_indexer.py).
+
 ### Search
 
 ```bash
