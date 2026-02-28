@@ -40,7 +40,7 @@ class FastSearchClient:
         socket_path: str | None = None,
         config_path: str | None = None,
         timeout: float = 30.0,
-    ):
+    ) -> None:
         """
         Initialize FastSearch client.
         
@@ -58,7 +58,7 @@ class FastSearchClient:
         self.timeout = timeout
         self._sock: socket.socket | None = None
     
-    def _connect(self):
+    def _connect(self) -> None:
         """Establish connection to daemon."""
         if self._sock is not None:
             return
@@ -78,12 +78,12 @@ class FastSearchClient:
                 pass
         except (ConnectionRefusedError, FileNotFoundError):
             self._sock = None
-            raise DaemonNotRunningError(f"Cannot connect to daemon at {self.socket_path}")
+            raise DaemonNotRunningError(f"Cannot connect to daemon at {self.socket_path}") from None
         except Exception as e:
             self._sock = None
-            raise FastSearchError(f"Connection error: {e}")
+            raise FastSearchError(f"Connection error: {e}") from e
     
-    def _disconnect(self):
+    def _disconnect(self) -> None:
         """Close connection."""
         if self._sock:
             try:
@@ -133,16 +133,18 @@ class FastSearchClient:
                     )
 
                 # Receive full response
-                response_data = b""
-                while len(response_data) < length:
-                    chunk = self._sock.recv(min(8192, length - len(response_data)))
+                response_data = bytearray(length)
+                bytes_read = 0
+                while bytes_read < length:
+                    chunk = self._sock.recv(min(8192, length - bytes_read))
                     if not chunk:
                         raise FastSearchError(
                             "Connection closed while receiving response"
                         )
-                    response_data += chunk
+                    response_data[bytes_read:bytes_read + len(chunk)] = chunk
+                    bytes_read += len(chunk)
 
-                response = json.loads(response_data.decode())
+                response = json.loads(response_data)
 
                 if not isinstance(response, dict):
                     raise FastSearchError(
@@ -162,16 +164,16 @@ class FastSearchClient:
                         " missing 'result' and 'error'"
                     )
 
-                return response.get("result", {})
+                return response["result"]
 
             except (OSError, socket.timeout) as e:
                 self._disconnect()
                 if attempt == 0:
                     continue  # retry once after reconnect
-                raise FastSearchError(f"Connection lost: {e}")
+                raise FastSearchError(f"Connection lost: {e}") from e
             except json.JSONDecodeError as e:
                 self._disconnect()
-                raise FastSearchError(f"Invalid response: {e}")
+                raise FastSearchError(f"Invalid response: {e}") from e
     
     def ping(self) -> bool:
         """Check if daemon is responding."""
@@ -316,14 +318,14 @@ class FastSearchClient:
         finally:
             self._disconnect()
     
-    def close(self):
+    def close(self) -> None:
         """Close the client connection."""
         self._disconnect()
     
-    def __enter__(self):
+    def __enter__(self) -> "FastSearchClient":
         return self
-    
-    def __exit__(self, *args):
+
+    def __exit__(self, *args: Any) -> None:
         self.close()
     
     @staticmethod

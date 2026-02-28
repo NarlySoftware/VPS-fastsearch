@@ -89,10 +89,16 @@ class FastSearchConfig:
     def from_dict(cls, data: dict[str, Any]) -> "FastSearchConfig":
         """Create configuration from dictionary."""
         daemon_data = data.get("daemon", {})
+        socket_path = daemon_data.get("socket_path", DEFAULT_SOCKET_PATH) or DEFAULT_SOCKET_PATH
+        pid_path = daemon_data.get("pid_path", DEFAULT_PID_PATH) or DEFAULT_PID_PATH
+        log_level = daemon_data.get("log_level", "INFO")
+        if log_level not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+            logger.warning(f"Invalid log_level: {log_level!r}, using default 'INFO'")
+            log_level = "INFO"
         daemon = DaemonConfig(
-            socket_path=daemon_data.get("socket_path", DEFAULT_SOCKET_PATH),
-            pid_path=daemon_data.get("pid_path", DEFAULT_PID_PATH),
-            log_level=daemon_data.get("log_level", "INFO"),
+            socket_path=socket_path,
+            pid_path=pid_path,
+            log_level=log_level,
         )
         
         models = {}

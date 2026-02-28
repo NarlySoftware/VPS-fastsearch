@@ -47,7 +47,7 @@ class Embedder:
                     cls._instance = cls(model_name)
         return cls._instance
 
-    def __init__(self, model_name: str | None = None):
+    def __init__(self, model_name: str | None = None) -> None:
         from fastembed import TextEmbedding
 
         self.model_name = model_name or self.MODEL_NAME
@@ -108,14 +108,14 @@ class Reranker:
                     cls._instance = cls(model_name)
         return cls._instance
 
-    def __init__(self, model_name: str | None = None):
+    def __init__(self, model_name: str | None = None) -> None:
         try:
             from sentence_transformers import CrossEncoder
         except ImportError:
             raise ImportError(
                 "Reranker requires sentence-transformers. "
                 "Install with: pip install vps-fastsearch[rerank]"
-            )
+            ) from None
 
         self.model_name = model_name or self.MODEL_NAME
         logger.info(f"Loading reranker model {self.model_name} (first run may download ~80MB)")
@@ -192,7 +192,7 @@ class SearchDB:
     EMBEDDING_DIM = 768
     MAX_SEARCH_LIMIT = 10000
 
-    def __init__(self, db_path: str | Path | None = None):
+    def __init__(self, db_path: str | Path | None = None) -> None:
         if db_path is None:
             from .config import DEFAULT_DB_PATH
             db_path = os.environ.get("FASTSEARCH_DB", DEFAULT_DB_PATH)
@@ -228,7 +228,7 @@ class SearchDB:
         """Execute SQL and return cursor."""
         return self.conn.execute(sql, params)
     
-    def _init_schema(self):
+    def _init_schema(self) -> None:
         """Initialize database schema."""
         # Main docs table
         self._execute("""
@@ -706,6 +706,6 @@ class SearchDB:
             "db_size_mb": round(db_size / (1024 * 1024), 2),
         }
     
-    def close(self):
+    def close(self) -> None:
         """Close database connection."""
         self.conn.close()

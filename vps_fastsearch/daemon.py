@@ -35,7 +35,7 @@ class LoadedModel:
     actual_memory_mb: float = 0.0
     ref_count: int = 0
 
-    def touch(self):
+    def touch(self) -> None:
         """Update last used timestamp."""
         self.last_used = time.time()
 
@@ -69,7 +69,7 @@ class ModelManager:
     - summarizer: (future) 7B models
     """
     
-    def __init__(self, config: FastSearchConfig):
+    def __init__(self, config: FastSearchConfig) -> None:
         self.config = config
         self._models: OrderedDict[str, LoadedModel] = OrderedDict()
         self._load_lock = asyncio.Lock()
@@ -193,7 +193,7 @@ class ModelManager:
                 model = self._models[slot]
                 model.ref_count = max(0, model.ref_count - 1)
     
-    async def _ensure_memory_budget(self, slot: str):
+    async def _ensure_memory_budget(self, slot: str) -> None:
         """Evict models if needed to fit new model."""
         needed_mb = self.estimate_model_memory(slot)
         max_ram = self.config.memory.max_ram_mb
@@ -224,7 +224,7 @@ class ModelManager:
                 break
             current_usage = self.get_memory_usage()
     
-    async def unload_model(self, slot: str):
+    async def unload_model(self, slot: str) -> None:
         """Unload a model from memory."""
         if slot not in self._models:
             return
@@ -258,7 +258,7 @@ class ModelManager:
         
         logger.info(f"Model {slot} unloaded. Memory: {self.get_memory_usage():.0f}MB")
     
-    def _schedule_unload(self, slot: str):
+    def _schedule_unload(self, slot: str) -> None:
         """Schedule auto-unload for on-demand models."""
         model_config = self.config.models.get(slot)
         if not model_config:
@@ -271,7 +271,7 @@ class ModelManager:
         if timeout <= 0:
             return
         
-        async def _delayed_unload():
+        async def _delayed_unload() -> None:
             await asyncio.sleep(timeout)
             if slot in self._models:
                 model = self._models[slot]
@@ -310,7 +310,7 @@ class ModelManager:
             "max_memory_mb": self.config.memory.max_ram_mb,
         }
     
-    async def shutdown(self):
+    async def shutdown(self) -> None:
         """Shutdown and unload all models."""
         # Cancel all unload tasks
         for task in self._unload_tasks.values():
@@ -331,7 +331,7 @@ class ModelManager:
 class RateLimiter:
     """Per-connection sliding window rate limiter."""
 
-    def __init__(self, max_requests: int = 20, window_seconds: float = 1.0):
+    def __init__(self, max_requests: int = 20, window_seconds: float = 1.0) -> None:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self._timestamps: deque[float] = deque()
@@ -354,7 +354,7 @@ class FastSearchDaemon:
     JSON-RPC 2.0 protocol for requests/responses.
     """
     
-    def __init__(self, config: FastSearchConfig | None = None):
+    def __init__(self, config: FastSearchConfig | None = None) -> None:
         self.config = config or load_config()
         self.model_manager = ModelManager(self.config)
         self._server: asyncio.Server | None = None
@@ -436,6 +436,10 @@ class FastSearchDaemon:
 
         db_path = params.get("db_path", DEFAULT_DB_PATH)
         limit = params.get("limit", 10)
+        if not isinstance(limit, int) or limit < 1:
+            raise ValueError("limit must be a positive integer")
+        if limit > 1000:
+            raise ValueError("limit must not exceed 1000")
         mode = params.get("mode", "hybrid")
         if mode not in ("bm25", "vector", "hybrid"):
             raise ValueError(f"Invalid mode: {mode!r}, must be 'bm25', 'vector', or 'hybrid'")
@@ -687,7 +691,7 @@ class FastSearchDaemon:
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
-    ):
+    ) -> None:
         """Handle a client connection."""
         # Tune socket buffers for large embed batches
         try:
@@ -755,7 +759,7 @@ class FastSearchDaemon:
             writer.close()
             await writer.wait_closed()
     
-    async def start(self, foreground: bool = True):
+    async def start(self, foreground: bool = True) -> None:
         """Start the daemon server."""
         socket_path = self.config.daemon.socket_path
 
@@ -845,7 +849,7 @@ class FastSearchDaemon:
             finally:
                 await self.stop()
     
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop the daemon server."""
         logger.info("Shutting down VPS-FastSearch daemon...")
         
@@ -880,7 +884,7 @@ class FastSearchDaemon:
         logger.info("VPS-FastSearch daemon stopped")
 
 
-def run_daemon(config_path: str | None = None, foreground: bool = True, detach: bool = False):
+def run_daemon(config_path: str | None = None, foreground: bool = True, detach: bool = False) -> None:
     """Run the VPS-FastSearch daemon."""
     # Set up logging
     config = load_config(config_path)
@@ -964,7 +968,7 @@ def run_daemon(config_path: str | None = None, foreground: bool = True, detach: 
     daemon = FastSearchDaemon(config)
 
     # Register atexit handler to checkpoint/close DBs on non-SIGKILL exits
-    def cleanup():
+    def cleanup() -> None:
         for db in daemon._db_cache.values():
             try:
                 db.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
@@ -978,10 +982,10 @@ def run_daemon(config_path: str | None = None, foreground: bool = True, detach: 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    def signal_handler():
+    def signal_handler() -> None:
         daemon._shutdown_event.set()
 
-    def sighup_handler():
+    def sighup_handler() -> None:
         logger.info("SIGHUP received, reloading configuration")
         asyncio.ensure_future(daemon._handle_reload_config({}))
 

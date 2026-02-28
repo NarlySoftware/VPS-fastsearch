@@ -19,7 +19,7 @@ from . import __version__
 @click.option("--db", default=DEFAULT_DB_PATH, help="Database path", envvar="FASTSEARCH_DB")
 @click.option("--config", "config_path", default=None, help="Config file path", envvar="FASTSEARCH_CONFIG")
 @click.pass_context
-def cli(ctx, db, config_path):
+def cli(ctx, db, config_path) -> None:
     """VPS-FastSearch - Fast memory/vector search for CPU-only VPS."""
     ctx.ensure_object(dict)
     ctx.obj["db_path"] = db
@@ -31,7 +31,7 @@ def cli(ctx, db, config_path):
 # ============================================================================
 
 @cli.group()
-def daemon():
+def daemon() -> None:
     """Manage the VPS-FastSearch daemon."""
     pass
 
@@ -40,7 +40,7 @@ def daemon():
 @click.option("--detach", "-d", is_flag=True, help="Run in background")
 @click.option("--config", "config_path", default=None, help="Config file path")
 @click.pass_context
-def daemon_start(ctx, detach, config_path):
+def daemon_start(ctx, detach, config_path) -> None:
     """Start the VPS-FastSearch daemon."""
     from .daemon import run_daemon, get_daemon_status
     
@@ -63,7 +63,7 @@ def daemon_start(ctx, detach, config_path):
 @daemon.command("stop")
 @click.option("--config", "config_path", default=None, help="Config file path")
 @click.pass_context
-def daemon_stop(ctx, config_path):
+def daemon_stop(ctx, config_path) -> None:
     """Stop the VPS-FastSearch daemon."""
     from .daemon import stop_daemon
     
@@ -79,7 +79,7 @@ def daemon_stop(ctx, config_path):
 @click.option("--config", "config_path", default=None, help="Config file path")
 @click.option("--json", "output_json", is_flag=True, help="Output as JSON")
 @click.pass_context
-def daemon_status(ctx, config_path, output_json):
+def daemon_status(ctx, config_path, output_json) -> None:
     """Show daemon status."""
     from .daemon import get_daemon_status
     
@@ -122,7 +122,7 @@ def daemon_status(ctx, config_path, output_json):
 @daemon.command("reload")
 @click.option("--config", "config_path", default=None, help="Config file path")
 @click.pass_context
-def daemon_reload(ctx, config_path):
+def daemon_reload(ctx, config_path) -> None:
     """Reload daemon configuration without restart."""
     config_path = config_path or ctx.obj.get("config_path")
     
@@ -141,14 +141,14 @@ def daemon_reload(ctx, config_path):
 # ============================================================================
 
 @cli.group()
-def config():
+def config() -> None:
     """Manage configuration."""
     pass
 
 
 @config.command("init")
 @click.option("--path", default=None, help="Config file path")
-def config_init(path):
+def config_init(path) -> None:
     """Create default configuration file."""
     config_path = create_default_config(path)
     click.echo(f"Created config at: {config_path}")
@@ -156,14 +156,14 @@ def config_init(path):
 
 @config.command("show")
 @click.option("--path", default=None, help="Config file path")
-def config_show(path):
+def config_show(path) -> None:
     """Show current configuration."""
     cfg = load_config(path)
     click.echo(cfg.to_yaml())
 
 
 @config.command("path")
-def config_path():
+def config_path() -> None:
     """Show default config file path."""
     click.echo(DEFAULT_CONFIG_PATH)
 
@@ -177,7 +177,7 @@ def config_path():
 @click.option("--glob", "-g", default="*.md", help="Glob pattern for directory indexing")
 @click.option("--reindex", is_flag=True, help="Delete existing chunks before indexing")
 @click.pass_context
-def index(ctx, path, glob, reindex):
+def index(ctx, path, glob, reindex) -> None:
     """Index a file or directory of documents."""
     path = Path(path)
     db = SearchDB(ctx.obj["db_path"])
@@ -289,7 +289,7 @@ def index(ctx, path, glob, reindex):
 @click.option("--no-daemon", is_flag=True, help="Force direct mode (no daemon)")
 @click.option("--json", "output_json", is_flag=True, help="Output as JSON")
 @click.pass_context
-def search(ctx, query, limit, mode, rerank, no_daemon, output_json):
+def search(ctx, query, limit, mode, rerank, no_daemon, output_json) -> None:
     """Search indexed documents."""
     db_path = ctx.obj["db_path"]
     config_path = ctx.obj.get("config_path")
@@ -401,7 +401,7 @@ def search(ctx, query, limit, mode, rerank, no_daemon, output_json):
 
 @cli.command()
 @click.pass_context
-def stats(ctx):
+def stats(ctx) -> None:
     """Show index statistics."""
     db_path = Path(ctx.obj["db_path"])
     
@@ -429,7 +429,7 @@ def stats(ctx):
 @cli.command()
 @click.argument("source")
 @click.pass_context
-def delete(ctx, source):
+def delete(ctx, source) -> None:
     """Delete all chunks from a source file."""
     db = SearchDB(ctx.obj["db_path"])
     
