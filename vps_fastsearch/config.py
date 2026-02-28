@@ -123,9 +123,13 @@ class FastSearchConfig:
         if not isinstance(max_ram, (int, float)) or max_ram <= 0:
             logger.warning(f"Invalid max_ram_mb: {max_ram!r}, using default 4000")
             max_ram = 4000
+        eviction_policy = memory_data.get("eviction_policy", "lru")
+        if eviction_policy not in ("lru", "fifo"):
+            logger.warning(f"Invalid eviction_policy: {eviction_policy!r}, using default 'lru'")
+            eviction_policy = "lru"
         memory = MemoryConfig(
-            max_ram_mb=max_ram,
-            eviction_policy=memory_data.get("eviction_policy", "lru"),
+            max_ram_mb=int(max_ram),
+            eviction_policy=eviction_policy,
         )
         
         return cls(daemon=daemon, models=models, memory=memory)

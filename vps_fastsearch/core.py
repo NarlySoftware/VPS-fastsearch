@@ -638,7 +638,7 @@ class SearchDB:
         rerank_scores = reranker.rerank(query, doc_contents)
         
         # Attach scores to candidates
-        for candidate, score in zip(candidates, rerank_scores):
+        for candidate, score in zip(candidates, rerank_scores, strict=True):
             candidate["rerank_score"] = score
         
         # Sort by reranker score (descending)

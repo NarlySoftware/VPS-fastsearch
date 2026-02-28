@@ -256,7 +256,7 @@ def index(ctx, path, glob, reindex):
         # Index chunks
         t0 = time.perf_counter()
         items = []
-        for i, ((text, metadata), embedding) in enumerate(zip(chunks, embeddings)):
+        for i, ((text, metadata), embedding) in enumerate(zip(chunks, embeddings, strict=True)):
             items.append((source, i, text, embedding, metadata))
         
         db.index_batch(items)

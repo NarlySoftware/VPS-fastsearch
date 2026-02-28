@@ -617,8 +617,8 @@ class FastSearchDaemon:
     async def _handle_request(self, data: bytes) -> bytes:
         """Process a JSON-RPC request."""
         try:
-            request = json.loads(data.decode())
-        except json.JSONDecodeError as e:
+            request = orjson.loads(data)
+        except (orjson.JSONDecodeError, ValueError) as e:
             return orjson.dumps({
                 "jsonrpc": "2.0",
                 "error": {"code": -32700, "message": f"Parse error: {e}"},
@@ -691,6 +691,10 @@ class FastSearchDaemon:
                     reader.readexactly(4), timeout=300.0
                 )
                 length = int.from_bytes(length_bytes, "big")
+
+                if length == 0:
+                    logger.warning("Zero-length message received, closing connection")
+                    break
 
                 if length > 10 * 1024 * 1024:  # 10MB limit
                     logger.warning(f"Message too large: {length} bytes")
