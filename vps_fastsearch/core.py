@@ -146,7 +146,7 @@ class Reranker:
         scores = self._model.predict(pairs)
         
         # Convert numpy array to list of floats
-        return scores.tolist()
+        return list(scores.tolist())
     
     def rerank_with_indices(
         self, query: str, documents: list[str], top_k: int | None = None
@@ -596,7 +596,7 @@ class SearchDB:
         embedding: list[float],
         limit: int = 10,
         rerank_top_k: int = 20,
-        reranker: "Reranker | None" = None,
+        reranker: Any = None,
     ) -> list[dict[str, Any]]:
         """
         Hybrid search with cross-encoder reranking.
@@ -681,7 +681,7 @@ class SearchDB:
                     pass  # ROLLBACK can fail if disk is full
                 raise
 
-        return count
+        return int(count)
     
     def get_stats(self) -> dict[str, Any]:
         """Get database statistics."""

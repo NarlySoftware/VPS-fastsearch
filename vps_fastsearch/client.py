@@ -92,7 +92,7 @@ class FastSearchClient:
                 pass
             self._sock = None
     
-    def _send_request(self, method: str, params: dict[str, Any] = None) -> dict[str, Any]:
+    def _send_request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send JSON-RPC request and get response."""
         request = {
             "jsonrpc": "2.0",
@@ -110,6 +110,7 @@ class FastSearchClient:
 
         for attempt in range(2):
             self._connect()
+            assert self._sock is not None
             try:
                 # Send length-prefixed message
                 self._sock.sendall(len(data).to_bytes(4, "big"))
@@ -164,7 +165,7 @@ class FastSearchClient:
                         " missing 'result' and 'error'"
                     )
 
-                return response["result"]
+                return dict(response["result"])
 
             except (OSError, socket.timeout) as e:
                 self._disconnect()
@@ -174,12 +175,13 @@ class FastSearchClient:
             except json.JSONDecodeError as e:
                 self._disconnect()
                 raise FastSearchError(f"Invalid response: {e}") from e
+        raise FastSearchError("Request failed after 2 attempts")
     
     def ping(self) -> bool:
         """Check if daemon is responding."""
         try:
             result = self._send_request("ping")
-            return result.get("pong", False)
+            return bool(result.get("pong", False))
         except Exception:
             return False
     
@@ -345,12 +347,12 @@ class FastSearchClient:
 
 
 # Convenience functions for quick usage
-def search(query: str, **kwargs) -> list[dict]:
+def search(query: str, **kwargs: Any) -> list[dict[str, Any]]:
     """Quick search using daemon (falls back to direct if unavailable)."""
     try:
         with FastSearchClient(timeout=10.0) as client:
             result = client.search(query, **kwargs)
-            return result.get("results", [])
+            return list(result.get("results", []))
     except (DaemonNotRunningError, FastSearchError):
         # Fall back to direct search
         from .core import SearchDB, get_embedder
@@ -384,7 +386,7 @@ def embed(texts: list[str]) -> list[list[float]]:
     try:
         with FastSearchClient(timeout=10.0) as client:
             result = client.embed(texts)
-            return result.get("embeddings", [])
+            return list(result.get("embeddings", []))
     except (DaemonNotRunningError, FastSearchError):
         from .core import get_embedder
         embedder = get_embedder()

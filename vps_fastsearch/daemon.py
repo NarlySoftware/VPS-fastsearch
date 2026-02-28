@@ -1,5 +1,7 @@
 """VPS-FastSearch daemon with Unix socket server and model management."""
 
+from __future__ import annotations
+
 import asyncio
 import atexit
 import json
@@ -13,7 +15,10 @@ import traceback
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from .core import SearchDB
 
 import orjson
 import psutil
@@ -56,7 +61,7 @@ class _RerankerAdapter:
             return []
         pairs = [[query, doc] for doc in documents]
         scores = self._model.predict(pairs)
-        return scores.tolist()
+        return list(scores.tolist())
 
 
 class ModelManager:
@@ -78,7 +83,7 @@ class ModelManager:
     def get_memory_usage(self) -> float:
         """Get current process memory usage in MB."""
         process = psutil.Process()
-        return process.memory_info().rss / (1024 * 1024)
+        return float(process.memory_info().rss) / (1024 * 1024)
     
     def estimate_model_memory(self, slot: str) -> float:
         """Estimate memory for a model slot (MB)."""
@@ -108,6 +113,7 @@ class ModelManager:
         except Exception:
             rss_before = None
 
+        instance: Any
         if slot == "embedder":
             from fastembed import TextEmbedding
             # Limit ONNX threads to reduce arena memory allocation
@@ -1085,7 +1091,7 @@ def get_daemon_status(config_path: str | None = None) -> dict | None:
             response += chunk
 
         result = json.loads(response)
-        return result.get("result")
+        return dict(result["result"]) if "result" in result else None
     except Exception:
         return None
     finally:
