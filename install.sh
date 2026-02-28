@@ -22,6 +22,23 @@ sudo apt-get update -qq
 sudo apt-get install -y python3.13 python3.13-venv python3.13-dev python3-full build-essential libsqlite3-dev
 echo "  Python 3.13 ready: $(python3.13 --version)"
 
+# Raise socket buffer limits for large embed batches (2MB per socket)
+if [ -f /proc/sys/net/core/rmem_max ]; then
+    CURRENT_MAX=$(cat /proc/sys/net/core/rmem_max)
+    if [ "$CURRENT_MAX" -lt 2097152 ]; then
+        echo "  Raising socket buffer limits to 2MB..."
+        sudo sysctl -w net.core.rmem_max=2097152 > /dev/null
+        sudo sysctl -w net.core.wmem_max=2097152 > /dev/null
+        # Persist across reboots
+        if ! grep -q "net.core.rmem_max" /etc/sysctl.d/99-fastsearch.conf 2>/dev/null; then
+            echo -e "net.core.rmem_max=2097152\nnet.core.wmem_max=2097152" | sudo tee /etc/sysctl.d/99-fastsearch.conf > /dev/null
+        fi
+        echo "  Socket buffer limits raised to 2MB"
+    else
+        echo "  Socket buffer limits already >= 2MB"
+    fi
+fi
+
 # ---- Step 2: Create virtual environment ----
 echo "[2/8] Setting up virtual environment..."
 
