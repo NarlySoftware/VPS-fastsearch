@@ -674,6 +674,15 @@ class FastSearchDaemon:
         writer: asyncio.StreamWriter,
     ):
         """Handle a client connection."""
+        # Tune socket buffers for large embed batches
+        try:
+            sock = writer.get_extra_info('socket')
+            if sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2_097_152)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2_097_152)
+        except (AttributeError, OSError):
+            pass
+
         limiter = RateLimiter()
         try:
             while True:
@@ -1000,6 +1009,11 @@ def get_daemon_status(config_path: str | None = None) -> dict | None:
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(2.0)
         sock.connect(socket_path)
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2_097_152)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2_097_152)
+        except OSError:
+            pass
 
         request = json.dumps({
             "jsonrpc": "2.0",

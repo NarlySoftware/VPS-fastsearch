@@ -70,6 +70,12 @@ class FastSearchClient:
             self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self._sock.settimeout(self.timeout)
             self._sock.connect(self.socket_path)
+            # Tune socket buffers for large embed batches
+            try:
+                self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2_097_152)
+                self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2_097_152)
+            except OSError:
+                pass
         except (ConnectionRefusedError, FileNotFoundError):
             self._sock = None
             raise DaemonNotRunningError(f"Cannot connect to daemon at {self.socket_path}")
