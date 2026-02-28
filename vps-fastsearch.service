@@ -6,9 +6,9 @@ After=network.target
 [Service]
 Type=simple
 
-# Main executable (install.sh puts venv in ~/fastsearch/.venv)
-ExecStart=%h/fastsearch/.venv/bin/vps-fastsearch daemon start
-ExecReload=%h/fastsearch/.venv/bin/vps-fastsearch daemon reload
+# Main executable (venv at ~/venv)
+ExecStart=%h/venv/bin/vps-fastsearch daemon start
+ExecReload=%h/venv/bin/vps-fastsearch daemon reload
 
 # Environment (install.sh puts config in ~/.config/fastsearch/)
 Environment="FASTSEARCH_CONFIG=%h/.config/fastsearch/config.yaml"
@@ -27,7 +27,7 @@ MemoryHigh=3G
 
 # Security hardening (user-service compatible)
 NoNewPrivileges=true
-PrivateTmp=true
+PrivateTmp=false
 
 # Timeout
 TimeoutStartSec=120

@@ -1011,13 +1011,14 @@ class SearchDB:
     def base_dir(self) -> Path:
         """Return the base directory for resolving relative source paths.
 
-        Defaults to the directory containing the database file.  Can be
-        overridden by storing a ``base_dir`` value in the ``db_meta`` table.
+        Defaults to the user's home directory (``$HOME``) for portability
+        across users and machines.  Can be overridden by storing a
+        ``base_dir`` value in the ``db_meta`` table.
         """
         stored = self.get_meta("base_dir")
         if stored:
             return Path(stored)
-        return self.db_path.parent
+        return Path.home()
 
     def set_base_dir(self, directory: str | Path) -> None:
         """Persist a custom base directory for relative path resolution."""

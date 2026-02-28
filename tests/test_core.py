@@ -220,9 +220,9 @@ def test_get_set_meta(db) -> None:
     assert db.get_meta("base_dir") == "/home/eva/new_docs"
 
 
-def test_base_dir_defaults_to_db_parent(db) -> None:
-    """base_dir should default to the parent directory of the DB file."""
-    assert db.base_dir == db.db_path.parent
+def test_base_dir_defaults_to_home(db) -> None:
+    """base_dir should default to the user's home directory."""
+    assert db.base_dir == Path.home()
 
 
 def test_base_dir_custom(db) -> None:
@@ -235,6 +235,7 @@ def test_base_dir_custom(db) -> None:
 
 def test_to_relative_under_base_dir(db) -> None:
     """to_relative should produce a simple relative path for files under base_dir."""
+    db.set_base_dir(str(db.db_path.parent))
     base = db.db_path.parent
     abs_path = base / "subdir" / "notes.md"
     rel = db.to_relative(abs_path)
@@ -244,6 +245,7 @@ def test_to_relative_under_base_dir(db) -> None:
 
 def test_to_relative_outside_base_dir(db) -> None:
     """to_relative should produce a ../.. style path for files outside base_dir."""
+    db.set_base_dir(str(db.db_path.parent))
     base = db.db_path.parent
     outside = base.parent / "elsewhere" / "file.txt"
     rel = db.to_relative(outside)
@@ -260,6 +262,7 @@ def test_to_relative_already_relative(db) -> None:
 
 def test_to_absolute_relative_path(db) -> None:
     """to_absolute should resolve a relative path against base_dir."""
+    db.set_base_dir(str(db.db_path.parent))
     base = db.db_path.parent
     result = db.to_absolute("subdir/notes.md")
     assert Path(result).is_absolute()
