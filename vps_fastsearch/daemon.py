@@ -9,7 +9,7 @@ import socket
 import sys
 import time
 import traceback
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -327,6 +327,25 @@ class ModelManager:
         gc.collect()
 
 
+class RateLimiter:
+    """Per-connection sliding window rate limiter."""
+
+    def __init__(self, max_requests: int = 20, window_seconds: float = 1.0):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._timestamps: deque[float] = deque()
+
+    def check(self) -> bool:
+        """Return True if request is allowed, False if rate-limited."""
+        now = time.monotonic()
+        while self._timestamps and self._timestamps[0] < now - self.window_seconds:
+            self._timestamps.popleft()
+        if len(self._timestamps) >= self.max_requests:
+            return False
+        self._timestamps.append(now)
+        return True
+
+
 class FastSearchDaemon:
     """
     Unix socket server for FastSearch operations.
@@ -342,6 +361,7 @@ class FastSearchDaemon:
         self._request_count = 0
         self._shutdown_event = asyncio.Event()
         self._db_cache: dict[str, "SearchDB"] = {}
+        self._concurrent_sem = asyncio.Semaphore(64)
 
         # Handler registry
         self._handlers: dict[str, Callable] = {
@@ -368,6 +388,7 @@ class FastSearchDaemon:
             "uptime_seconds": time.time() - self._start_time if self._start_time else 0,
             "request_count": self._request_count,
             "socket_path": self.config.daemon.socket_path,
+            "concurrent_slots_available": self._concurrent_sem._value,
             **model_status,
         }
     
@@ -653,6 +674,7 @@ class FastSearchDaemon:
         writer: asyncio.StreamWriter,
     ):
         """Handle a client connection."""
+        limiter = RateLimiter()
         try:
             while True:
                 # Read length prefix (idle timeout: 300s)
@@ -665,16 +687,35 @@ class FastSearchDaemon:
                     logger.warning(f"Message too large: {length} bytes")
                     break
 
+                # Check per-connection rate limit before reading body
+                if not limiter.check():
+                    logger.warning("Client rate-limited (>20 req/s)")
+                    error_response = orjson.dumps({
+                        "jsonrpc": "2.0",
+                        "error": {"code": -32000, "message": "Rate limited"},
+                        "id": None,
+                    })
+                    # Still need to consume the message body to stay in sync
+                    await asyncio.wait_for(
+                        reader.readexactly(length), timeout=30.0
+                    )
+                    writer.write(len(error_response).to_bytes(4, "big"))
+                    writer.write(error_response)
+                    await writer.drain()
+                    continue
+
                 # Read message body (data timeout: 30s)
                 data = await asyncio.wait_for(
                     reader.readexactly(length), timeout=30.0
                 )
-                response = await self._handle_request(data)
 
-                # Send length-prefixed response
-                writer.write(len(response).to_bytes(4, "big"))
-                writer.write(response)
-                await writer.drain()
+                # Acquire concurrency slot, then process and respond
+                async with self._concurrent_sem:
+                    response = await self._handle_request(data)
+                    # Send length-prefixed response
+                    writer.write(len(response).to_bytes(4, "big"))
+                    writer.write(response)
+                    await writer.drain()
 
         except asyncio.IncompleteReadError:
             pass  # Client disconnected
