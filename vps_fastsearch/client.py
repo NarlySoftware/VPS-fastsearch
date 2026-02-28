@@ -10,11 +10,13 @@ from .config import DEFAULT_DB_PATH, DEFAULT_SOCKET_PATH, load_config
 
 class FastSearchError(Exception):
     """FastSearch client error."""
+
     pass
 
 
 class DaemonNotRunningError(FastSearchError):
     """Daemon is not running or unreachable."""
+
     pass
 
 
@@ -128,9 +130,7 @@ class FastSearchClient:
                 # Validate response size
                 if length > MAX_MESSAGE_SIZE:
                     self._disconnect()
-                    raise FastSearchError(
-                        f"Response too large: {length} bytes (max 10MB)"
-                    )
+                    raise FastSearchError(f"Response too large: {length} bytes (max 10MB)")
 
                 # Receive full response
                 response_data = bytearray(length)
@@ -138,30 +138,24 @@ class FastSearchClient:
                 while bytes_read < length:
                     chunk = self._sock.recv(min(8192, length - bytes_read))
                     if not chunk:
-                        raise FastSearchError(
-                            "Connection closed while receiving response"
-                        )
-                    response_data[bytes_read:bytes_read + len(chunk)] = chunk
+                        raise FastSearchError("Connection closed while receiving response")
+                    response_data[bytes_read : bytes_read + len(chunk)] = chunk
                     bytes_read += len(chunk)
 
                 response = json.loads(response_data)
 
                 if not isinstance(response, dict):
                     raise FastSearchError(
-                        f"Invalid JSON-RPC response: expected dict,"
-                        f" got {type(response).__name__}"
+                        f"Invalid JSON-RPC response: expected dict, got {type(response).__name__}"
                     )
 
                 if "error" in response:
                     error = response["error"]
-                    raise FastSearchError(
-                        f"RPC error {error.get('code')}: {error.get('message')}"
-                    )
+                    raise FastSearchError(f"RPC error {error.get('code')}: {error.get('message')}")
 
                 if "result" not in response:
                     raise FastSearchError(
-                        "Invalid JSON-RPC response from daemon:"
-                        " missing 'result' and 'error'"
+                        "Invalid JSON-RPC response from daemon: missing 'result' and 'error'"
                     )
 
                 return dict(response["result"])
@@ -226,13 +220,16 @@ class FastSearchClient:
         """
         if db_path is None:
             db_path = os.environ.get("FASTSEARCH_DB", DEFAULT_DB_PATH)
-        return self._send_request("search", {
-            "query": query,
-            "db_path": db_path,
-            "limit": limit,
-            "mode": mode,
-            "rerank": rerank,
-        })
+        return self._send_request(
+            "search",
+            {
+                "query": query,
+                "db_path": db_path,
+                "limit": limit,
+                "mode": mode,
+                "rerank": rerank,
+            },
+        )
 
     def embed(self, texts: list[str]) -> dict[str, Any]:
         """
@@ -263,10 +260,13 @@ class FastSearchClient:
             - ranked: Sorted list of {index, score}
             - rerank_time_ms: Reranking latency
         """
-        return self._send_request("rerank", {
-            "query": query,
-            "documents": documents,
-        })
+        return self._send_request(
+            "rerank",
+            {
+                "query": query,
+                "documents": documents,
+            },
+        )
 
     def load_model(self, slot: str) -> dict[str, Any]:
         """
@@ -369,9 +369,7 @@ def search(query: str, **kwargs: Any) -> list[dict[str, Any]]:
                 embedder = get_embedder()
                 embedding = embedder.embed_single(query)
                 if rerank:
-                    results = db.search_hybrid_reranked(
-                        query, embedding, limit=limit
-                    )
+                    results = db.search_hybrid_reranked(query, embedding, limit=limit)
                 else:
                     results = db.search_hybrid(query, embedding, limit=limit)
         finally:
@@ -388,5 +386,6 @@ def embed(texts: list[str]) -> list[list[float]]:
             return list(result.get("embeddings", []))
     except (DaemonNotRunningError, FastSearchError):
         from .core import get_embedder
+
         embedder = get_embedder()
         return embedder.embed(texts)

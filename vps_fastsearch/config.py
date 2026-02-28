@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 # Try to import yaml, fall back to simple parsing
 try:
     import yaml
+
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
@@ -20,9 +21,7 @@ except ImportError:
 _xdg_config = os.environ.get("XDG_CONFIG_HOME", os.path.join(Path.home(), ".config"))
 DEFAULT_CONFIG_PATH = Path(_xdg_config) / "fastsearch" / "config.yaml"
 
-_xdg_data = os.environ.get(
-    "XDG_DATA_HOME", os.path.join(Path.home(), ".local", "share")
-)
+_xdg_data = os.environ.get("XDG_DATA_HOME", os.path.join(Path.home(), ".local", "share"))
 DEFAULT_DB_PATH = os.path.join(_xdg_data, "fastsearch", "fastsearch.db")
 
 _xdg_runtime = os.environ.get("XDG_RUNTIME_DIR")
@@ -37,6 +36,7 @@ else:
 @dataclass
 class ModelConfig:
     """Configuration for a single model slot."""
+
     name: str
     keep_loaded: Literal["always", "on_demand", "never"] = "on_demand"
     idle_timeout_seconds: int = 300
@@ -46,6 +46,7 @@ class ModelConfig:
 @dataclass
 class MemoryConfig:
     """Memory management configuration."""
+
     max_ram_mb: int = 4000
     eviction_policy: Literal["lru", "fifo"] = "lru"
 
@@ -53,6 +54,7 @@ class MemoryConfig:
 @dataclass
 class DaemonConfig:
     """Daemon server configuration."""
+
     socket_path: str = DEFAULT_SOCKET_PATH
     pid_path: str = DEFAULT_PID_PATH
     log_level: str = "INFO"
@@ -61,6 +63,7 @@ class DaemonConfig:
 @dataclass
 class FastSearchConfig:
     """Complete FastSearch configuration."""
+
     daemon: DaemonConfig = field(default_factory=DaemonConfig)
     models: dict[str, ModelConfig] = field(default_factory=dict)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
@@ -106,11 +109,15 @@ class FastSearchConfig:
             if isinstance(model_data, dict):
                 keep_loaded = model_data.get("keep_loaded", "on_demand")
                 if keep_loaded not in ("always", "on_demand", "never"):
-                    logger.warning(f"Invalid keep_loaded: {keep_loaded!r}, using default 'on_demand'")
+                    logger.warning(
+                        f"Invalid keep_loaded: {keep_loaded!r}, using default 'on_demand'"
+                    )
                     keep_loaded = "on_demand"
                 idle_timeout = model_data.get("idle_timeout_seconds", 300)
                 if not isinstance(idle_timeout, (int, float)) or idle_timeout < 0:
-                    logger.warning(f"Invalid idle_timeout_seconds: {idle_timeout!r}, using default 300")
+                    logger.warning(
+                        f"Invalid idle_timeout_seconds: {idle_timeout!r}, using default 300"
+                    )
                     idle_timeout = 300
                 idle_timeout = int(idle_timeout)
                 threads = model_data.get("threads", 2)
@@ -223,7 +230,7 @@ def _simple_yaml_parse(content: str) -> dict[str, Any]:
         if ":" in stripped:
             key, _, value = stripped.partition(":")
             key = key.strip()
-            value = value.strip().strip('"\'')
+            value = value.strip().strip("\"'")
 
             if indent == 0:
                 # Top-level key

@@ -32,6 +32,7 @@ logger = logging.getLogger("vps_fastsearch.daemon")
 @dataclass
 class LoadedModel:
     """Tracks a loaded model and its metadata."""
+
     slot: str
     instance: Any
     loaded_at: float
@@ -88,9 +89,9 @@ class ModelManager:
     def estimate_model_memory(self, slot: str) -> float:
         """Estimate memory for a model slot (MB)."""
         estimates = {
-            "embedder": 450,   # bge-base-en-v1.5
-            "reranker": 90,    # ms-marco-MiniLM-L-6-v2
-            "summarizer": 4000, # 7B model (future)
+            "embedder": 450,  # bge-base-en-v1.5
+            "reranker": 90,  # ms-marco-MiniLM-L-6-v2
+            "summarizer": 4000,  # 7B model (future)
         }
         return estimates.get(slot, 500)
 
@@ -116,10 +117,12 @@ class ModelManager:
         instance: Any
         if slot == "embedder":
             from fastembed import TextEmbedding
+
             # Limit ONNX threads to reduce arena memory allocation
             instance = TextEmbedding(model_config.name, threads=model_config.threads)
         elif slot == "reranker":
             from sentence_transformers import CrossEncoder
+
             instance = CrossEncoder(model_config.name)
         else:
             raise ValueError(f"Unknown model slot: {slot}")
@@ -183,9 +186,7 @@ class ModelManager:
             )
 
             self._models[slot] = model
-            logger.info(
-                f"Model {slot} loaded. Memory: {self.get_memory_usage():.0f}MB"
-            )
+            logger.info(f"Model {slot} loaded. Memory: {self.get_memory_usage():.0f}MB")
 
             # Schedule unload if on-demand
             self._schedule_unload(slot)
@@ -224,9 +225,7 @@ class ModelManager:
             await self.unload_model(evict_slot)
             # If model wasn't actually unloaded (ref_count > 0), stop trying
             if evict_slot in self._models:
-                logger.warning(
-                    f"Cannot evict {evict_slot}: still has active references"
-                )
+                logger.warning(f"Cannot evict {evict_slot}: still has active references")
                 break
             current_usage = self.get_memory_usage()
 
@@ -239,9 +238,7 @@ class ModelManager:
 
         # Don't unload models with active references
         if model.ref_count > 0:
-            logger.info(
-                f"Skipping unload of {slot}: {model.ref_count} active refs"
-            )
+            logger.info(f"Skipping unload of {slot}: {model.ref_count} active refs")
             return
 
         # Don't unload "always" models
@@ -260,6 +257,7 @@ class ModelManager:
 
         # Force garbage collection
         import gc
+
         gc.collect()
 
         logger.info(f"Model {slot} unloaded. Memory: {self.get_memory_usage():.0f}MB")
@@ -331,6 +329,7 @@ class ModelManager:
                 del model.instance
 
         import gc
+
         gc.collect()
 
 
@@ -411,9 +410,7 @@ class FastSearchDaemon:
         allowed_base = Path(DEFAULT_DB_PATH).resolve().parent
         resolved = Path(db_path).resolve()
         if allowed_base not in resolved.parents and resolved != allowed_base:
-            raise ValueError(
-                f"db_path must be under {allowed_base}"
-            )
+            raise ValueError(f"db_path must be under {allowed_base}")
         key = str(resolved)
         if key not in self._db_cache:
             from .core import SearchDB
@@ -463,30 +460,24 @@ class FastSearchDaemon:
             if mode == "bm25":
                 results = db.search_bm25(query, limit=limit)
             elif mode == "vector":
-                embedding = list(
-                    embedder_model.instance.embed([query])
-                )[0].tolist()
+                embedding = list(embedder_model.instance.embed([query]))[0].tolist()
                 results = db.search_vector(embedding, limit=limit)
             else:  # hybrid
-                embedding = list(
-                    embedder_model.instance.embed([query])
-                )[0].tolist()
+                embedding = list(embedder_model.instance.embed([query]))[0].tolist()
 
                 if rerank:
                     # Load reranker on-demand
-                    reranker_model = await self.model_manager.load_model(
-                        "reranker"
-                    )
+                    reranker_model = await self.model_manager.load_model("reranker")
 
                     results = db.search_hybrid_reranked(
-                        query, embedding, limit=limit,
+                        query,
+                        embedding,
+                        limit=limit,
                         rerank_top_k=min(limit * 3, 30),
                         reranker=_RerankerAdapter(reranker_model.instance),
                     )
                 else:
-                    results = db.search_hybrid(
-                        query, embedding, limit=limit
-                    )
+                    results = db.search_hybrid(query, embedding, limit=limit)
 
             search_time = time.perf_counter() - start_time
 
@@ -553,16 +544,11 @@ class FastSearchDaemon:
             rerank_time = time.perf_counter() - start_time
 
             # Return sorted indices with scores
-            indexed_scores = sorted(
-                enumerate(scores), key=lambda x: x[1], reverse=True
-            )
+            indexed_scores = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
 
             return {
                 "scores": scores,
-                "ranked": [
-                    {"index": idx, "score": score}
-                    for idx, score in indexed_scores
-                ],
+                "ranked": [{"index": idx, "score": score} for idx, score in indexed_scores],
                 "rerank_time_ms": round(rerank_time * 1000, 2),
             }
         finally:
@@ -604,13 +590,9 @@ class FastSearchDaemon:
         if config_path is not None:
             resolved = Path(config_path).resolve()
             if resolved.suffix not in (".yaml", ".yml"):
-                raise ValueError(
-                    f"Config path must end with .yaml or .yml: {config_path}"
-                )
+                raise ValueError(f"Config path must end with .yaml or .yml: {config_path}")
             if not resolved.is_file():
-                raise ValueError(
-                    f"Config file does not exist: {resolved}"
-                )
+                raise ValueError(f"Config file does not exist: {resolved}")
             config_path = str(resolved)
 
         new_config = load_config(config_path)
@@ -632,66 +614,82 @@ class FastSearchDaemon:
         try:
             request = orjson.loads(data)
         except (orjson.JSONDecodeError, ValueError) as e:
-            return orjson.dumps({
-                "jsonrpc": "2.0",
-                "error": {"code": -32700, "message": f"Parse error: {e}"},
-                "id": None,
-            })
+            return orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32700, "message": f"Parse error: {e}"},
+                    "id": None,
+                }
+            )
 
         if not isinstance(request, dict):
-            return orjson.dumps({
-                "jsonrpc": "2.0",
-                "error": {"code": -32600, "message": "Invalid Request: expected JSON object"},
-                "id": None,
-            })
+            return orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32600, "message": "Invalid Request: expected JSON object"},
+                    "id": None,
+                }
+            )
 
         request_id = request.get("id")
         method = request.get("method")
         if not isinstance(method, str):
-            return orjson.dumps({
-                "jsonrpc": "2.0",
-                "error": {"code": -32600, "message": "method must be a string"},
-                "id": request_id,
-            })
+            return orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32600, "message": "method must be a string"},
+                    "id": request_id,
+                }
+            )
         params = request.get("params", {})
         if not isinstance(params, dict):
-            return orjson.dumps({
-                "jsonrpc": "2.0",
-                "error": {"code": -32602, "message": "params must be an object"},
-                "id": request_id,
-            })
+            return orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32602, "message": "params must be an object"},
+                    "id": request_id,
+                }
+            )
 
         self._request_count += 1
 
         if method not in self._handlers:
-            return orjson.dumps({
-                "jsonrpc": "2.0",
-                "error": {"code": -32601, "message": f"Method not found: {method}"},
-                "id": request_id,
-            })
+            return orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32601, "message": f"Method not found: {method}"},
+                    "id": request_id,
+                }
+            )
 
         try:
             result = await self._handlers[method](params)
-            return orjson.dumps({
-                "jsonrpc": "2.0",
-                "result": result,
-                "id": request_id,
-            })
+            return orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "result": result,
+                    "id": request_id,
+                }
+            )
         except ValueError as e:
-            return orjson.dumps({
-                "jsonrpc": "2.0",
-                "error": {"code": -32602, "message": str(e)},
-                "id": request_id,
-            })
+            return orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32602, "message": str(e)},
+                    "id": request_id,
+                }
+            )
         except Exception as e:
             logger.exception(f"Error handling {method}")
             # Return generic message to client; details are in the daemon log
             error_type = type(e).__name__
-            return orjson.dumps({
-                "jsonrpc": "2.0",
-                "error": {"code": -32000, "message": f"Internal error: {error_type}"},
-                "id": request_id,
-            })
+            return orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32000, "message": f"Internal error: {error_type}"},
+                    "id": request_id,
+                }
+            )
 
     async def _handle_client(
         self,
@@ -701,7 +699,7 @@ class FastSearchDaemon:
         """Handle a client connection."""
         # Tune socket buffers for large embed batches
         try:
-            sock = writer.get_extra_info('socket')
+            sock = writer.get_extra_info("socket")
             if sock:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2_097_152)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2_097_152)
@@ -712,9 +710,7 @@ class FastSearchDaemon:
         try:
             while True:
                 # Read length prefix (idle timeout: 300s)
-                length_bytes = await asyncio.wait_for(
-                    reader.readexactly(4), timeout=300.0
-                )
+                length_bytes = await asyncio.wait_for(reader.readexactly(4), timeout=300.0)
                 length = int.from_bytes(length_bytes, "big")
 
                 if length == 0:
@@ -728,24 +724,22 @@ class FastSearchDaemon:
                 # Check per-connection rate limit before reading body
                 if not limiter.check():
                     logger.warning("Client rate-limited (>20 req/s)")
-                    error_response = orjson.dumps({
-                        "jsonrpc": "2.0",
-                        "error": {"code": -32000, "message": "Rate limited"},
-                        "id": None,
-                    })
-                    # Still need to consume the message body to stay in sync
-                    await asyncio.wait_for(
-                        reader.readexactly(length), timeout=30.0
+                    error_response = orjson.dumps(
+                        {
+                            "jsonrpc": "2.0",
+                            "error": {"code": -32000, "message": "Rate limited"},
+                            "id": None,
+                        }
                     )
+                    # Still need to consume the message body to stay in sync
+                    await asyncio.wait_for(reader.readexactly(length), timeout=30.0)
                     writer.write(len(error_response).to_bytes(4, "big"))
                     writer.write(error_response)
                     await writer.drain()
                     continue
 
                 # Read message body (data timeout: 30s)
-                data = await asyncio.wait_for(
-                    reader.readexactly(length), timeout=30.0
-                )
+                data = await asyncio.wait_for(reader.readexactly(length), timeout=30.0)
 
                 # Acquire concurrency slot, then process and respond
                 async with self._concurrent_sem:
@@ -792,9 +786,7 @@ class FastSearchDaemon:
                     "Stop it first with 'vps-fastsearch daemon stop'."
                 )
             # PID reused by a different process — treat PID file as stale
-            logger.warning(
-                f"Stale PID file: process {pid} exists but is not fastsearch"
-            )
+            logger.warning(f"Stale PID file: process {pid} exists but is not fastsearch")
         except (FileNotFoundError, ValueError):
             pass  # No PID file or invalid content
 
@@ -890,7 +882,9 @@ class FastSearchDaemon:
         logger.info("VPS-FastSearch daemon stopped")
 
 
-def run_daemon(config_path: str | None = None, foreground: bool = True, detach: bool = False) -> None:
+def run_daemon(
+    config_path: str | None = None, foreground: bool = True, detach: bool = False
+) -> None:
     """Run the VPS-FastSearch daemon."""
     # Set up logging
     config = load_config(config_path)
@@ -1064,12 +1058,14 @@ def get_daemon_status(config_path: str | None = None) -> dict[str, Any] | None:
         except OSError:
             pass
 
-        request = json.dumps({
-            "jsonrpc": "2.0",
-            "method": "status",
-            "params": {},
-            "id": 1,
-        }).encode()
+        request = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "status",
+                "params": {},
+                "id": 1,
+            }
+        ).encode()
 
         sock.sendall(len(request).to_bytes(4, "big"))
         sock.sendall(request)

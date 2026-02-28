@@ -24,6 +24,7 @@ def test_from_dict_roundtrip():
 def test_load_config_nonexistent_path():
     """Loading from an explicit nonexistent path should raise FileNotFoundError."""
     import pytest
+
     with pytest.raises(FileNotFoundError):
         load_config("/tmp/nonexistent_fastsearch_config_xyz_12345.yaml")
 

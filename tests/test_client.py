@@ -29,6 +29,7 @@ from vps_fastsearch.config import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_config(socket_path: str = "/tmp/test_fastsearch_client.sock") -> FastSearchConfig:
     return FastSearchConfig(
         daemon=DaemonConfig(socket_path=socket_path),
@@ -112,6 +113,7 @@ class _FakeServer:
 # FastSearchClient init
 # ---------------------------------------------------------------------------
 
+
 class TestFastSearchClientInit:
     """Tests for __init__ path resolution."""
 
@@ -146,6 +148,7 @@ class TestFastSearchClientInit:
 # ---------------------------------------------------------------------------
 # FastSearchClient._connect
 # ---------------------------------------------------------------------------
+
 
 class TestConnect:
     """Tests for the lazy _connect method."""
@@ -189,6 +192,7 @@ class TestConnect:
 # ---------------------------------------------------------------------------
 # FastSearchClient._disconnect
 # ---------------------------------------------------------------------------
+
 
 class TestDisconnect:
     """Tests for _disconnect."""
@@ -235,6 +239,7 @@ class TestDisconnect:
 # Context manager
 # ---------------------------------------------------------------------------
 
+
 class TestContextManager:
     """Tests for __enter__ / __exit__."""
 
@@ -262,14 +267,16 @@ class TestContextManager:
 # is_daemon_running
 # ---------------------------------------------------------------------------
 
+
 class TestIsDaemonRunning:
     """Tests for the static is_daemon_running helper."""
 
     def test_returns_false_when_no_socket(self) -> None:
         """Returns False when the socket file does not exist."""
-        assert FastSearchClient.is_daemon_running(
-            socket_path="/tmp/fastsearch_test_absent_xyz.sock"
-        ) is False
+        assert (
+            FastSearchClient.is_daemon_running(socket_path="/tmp/fastsearch_test_absent_xyz.sock")
+            is False
+        )
 
     def test_returns_false_when_socket_exists_but_no_listener(self) -> None:
         """Returns False when socket file exists but nothing is listening."""
@@ -297,6 +304,7 @@ class TestIsDaemonRunning:
 # ping
 # ---------------------------------------------------------------------------
 
+
 class TestPing:
     """Tests for ping()."""
 
@@ -309,6 +317,7 @@ class TestPing:
 # ---------------------------------------------------------------------------
 # _send_request — size validation
 # ---------------------------------------------------------------------------
+
 
 class TestSendRequestValidation:
     """Tests for _send_request size guard."""
@@ -339,6 +348,7 @@ class TestSendRequestValidation:
 # ---------------------------------------------------------------------------
 # _send_request — response handling
 # ---------------------------------------------------------------------------
+
 
 class TestSendRequestResponse:
     """Tests for _send_request response parsing."""
@@ -384,6 +394,7 @@ class TestSendRequestResponse:
 # Convenience functions: search() and embed()
 # ---------------------------------------------------------------------------
 
+
 class TestConvenienceFunctions:
     """Tests for module-level search() and embed() fallback behaviour."""
 
@@ -401,9 +412,7 @@ class TestConvenienceFunctions:
             patch("vps_fastsearch.client.FastSearchClient") as MockClient,
             patch("vps_fastsearch.core.SearchDB", return_value=mock_db),
         ):
-            MockClient.return_value.__enter__.side_effect = DaemonNotRunningError(
-                "no daemon"
-            )
+            MockClient.return_value.__enter__.side_effect = DaemonNotRunningError("no daemon")
 
             results = search("test query", mode="bm25", db_path="/tmp/fake.db")
 
@@ -418,18 +427,14 @@ class TestConvenienceFunctions:
             patch("vps_fastsearch.client.FastSearchClient") as MockClient,
             patch("vps_fastsearch.core.get_embedder", return_value=mock_embedder),
         ):
-            MockClient.return_value.__enter__.side_effect = DaemonNotRunningError(
-                "no daemon"
-            )
+            MockClient.return_value.__enter__.side_effect = DaemonNotRunningError("no daemon")
 
             result = embed(["hello world"])
 
         assert isinstance(result, list)
         mock_embedder.embed.assert_called_once_with(["hello world"])
 
-    def test_search_returns_list_of_results_from_daemon(
-        self, tmp_path: Any
-    ) -> None:
+    def test_search_returns_list_of_results_from_daemon(self, tmp_path: Any) -> None:
         """search() returns the results list from the daemon response."""
         fake_results = [{"content": "doc1", "rank": 1}, {"content": "doc2", "rank": 2}]
 

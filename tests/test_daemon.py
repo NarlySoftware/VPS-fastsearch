@@ -29,6 +29,7 @@ from vps_fastsearch.daemon import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_config(
     max_ram_mb: int = 4000,
     socket_path: str = "/tmp/test_fastsearch.sock",
@@ -72,6 +73,7 @@ def _make_loaded_model(slot: str = "embedder", ref_count: int = 0) -> LoadedMode
 # ---------------------------------------------------------------------------
 # RateLimiter tests
 # ---------------------------------------------------------------------------
+
 
 class TestRateLimiter:
     """Tests for the sliding-window RateLimiter."""
@@ -127,6 +129,7 @@ class TestRateLimiter:
 # _RerankerAdapter tests
 # ---------------------------------------------------------------------------
 
+
 class TestRerankerAdapter:
     """Tests for _RerankerAdapter."""
 
@@ -169,6 +172,7 @@ class TestRerankerAdapter:
 # LoadedModel tests
 # ---------------------------------------------------------------------------
 
+
 class TestLoadedModel:
     """Tests for LoadedModel.touch()."""
 
@@ -209,6 +213,7 @@ class TestLoadedModel:
 # ---------------------------------------------------------------------------
 # ModelManager tests
 # ---------------------------------------------------------------------------
+
 
 class TestModelManager:
     """Tests for ModelManager without loading real models."""
@@ -309,6 +314,7 @@ class TestModelManager:
 # FastSearchDaemon._handle_request tests
 # ---------------------------------------------------------------------------
 
+
 class TestHandleRequest:
     """Tests for JSON-RPC protocol handling in FastSearchDaemon._handle_request."""
 
@@ -339,17 +345,13 @@ class TestHandleRequest:
     def test_invalid_request_array(self) -> None:
         """JSON array instead of object returns -32600."""
         daemon = self._make_daemon()
-        response = orjson.loads(
-            self._run(daemon._handle_request(orjson.dumps([1, 2, 3])))
-        )
+        response = orjson.loads(self._run(daemon._handle_request(orjson.dumps([1, 2, 3]))))
         assert response["error"]["code"] == -32600
 
     def test_invalid_request_null(self) -> None:
         """JSON null returns -32600."""
         daemon = self._make_daemon()
-        response = orjson.loads(
-            self._run(daemon._handle_request(orjson.dumps(None)))
-        )
+        response = orjson.loads(self._run(daemon._handle_request(orjson.dumps(None))))
         assert response["error"]["code"] == -32600
 
     def test_invalid_request_method_not_string(self) -> None:
@@ -362,9 +364,7 @@ class TestHandleRequest:
     def test_invalid_request_params_not_dict(self) -> None:
         """Array params returns -32602."""
         daemon = self._make_daemon()
-        payload = orjson.dumps(
-            {"jsonrpc": "2.0", "method": "ping", "params": [1, 2], "id": 1}
-        )
+        payload = orjson.dumps({"jsonrpc": "2.0", "method": "ping", "params": [1, 2], "id": 1})
         response = orjson.loads(self._run(daemon._handle_request(payload)))
         assert response["error"]["code"] == -32602
 
@@ -373,9 +373,7 @@ class TestHandleRequest:
     def test_method_not_found(self) -> None:
         """Unknown method returns -32601."""
         daemon = self._make_daemon()
-        payload = orjson.dumps(
-            {"jsonrpc": "2.0", "method": "nonexistent", "params": {}, "id": 7}
-        )
+        payload = orjson.dumps({"jsonrpc": "2.0", "method": "nonexistent", "params": {}, "id": 7})
         response = orjson.loads(self._run(daemon._handle_request(payload)))
         assert response["error"]["code"] == -32601
         assert response["id"] == 7
@@ -385,9 +383,7 @@ class TestHandleRequest:
     def test_valid_ping_returns_result(self) -> None:
         """A well-formed ping request returns a result with pong=True."""
         daemon = self._make_daemon()
-        payload = orjson.dumps(
-            {"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1}
-        )
+        payload = orjson.dumps({"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1})
         response = orjson.loads(self._run(daemon._handle_request(payload)))
         assert "result" in response
         assert response["result"]["pong"] is True
@@ -403,9 +399,7 @@ class TestHandleRequest:
             raise ValueError("bad param")
 
         daemon._handlers["bad_method"] = _bad_handler
-        payload = orjson.dumps(
-            {"jsonrpc": "2.0", "method": "bad_method", "params": {}, "id": 99}
-        )
+        payload = orjson.dumps({"jsonrpc": "2.0", "method": "bad_method", "params": {}, "id": 99})
         response = orjson.loads(self._run(daemon._handle_request(payload)))
         assert response["error"]["code"] == -32602
         assert "bad param" in response["error"]["message"]
@@ -421,9 +415,7 @@ class TestHandleRequest:
             raise RuntimeError("boom")
 
         daemon._handlers["crash"] = _crashing_handler
-        payload = orjson.dumps(
-            {"jsonrpc": "2.0", "method": "crash", "params": {}, "id": 5}
-        )
+        payload = orjson.dumps({"jsonrpc": "2.0", "method": "crash", "params": {}, "id": 5})
         response = orjson.loads(self._run(daemon._handle_request(payload)))
         assert response["error"]["code"] == -32000
         assert response["id"] == 5
@@ -433,9 +425,7 @@ class TestHandleRequest:
     def test_response_id_preserved(self) -> None:
         """Response id must match request id."""
         daemon = self._make_daemon()
-        payload = orjson.dumps(
-            {"jsonrpc": "2.0", "method": "ping", "params": {}, "id": "abc-123"}
-        )
+        payload = orjson.dumps({"jsonrpc": "2.0", "method": "ping", "params": {}, "id": "abc-123"})
         response = orjson.loads(self._run(daemon._handle_request(payload)))
         assert response["id"] == "abc-123"
 
@@ -455,36 +445,42 @@ class TestHandleRequest:
         # The mode validation happens before load_model is called, so we don't
         # need to mock the model manager at all.
         daemon = self._make_daemon()
-        payload = orjson.dumps({
-            "jsonrpc": "2.0",
-            "method": "search",
-            "params": {"query": "test", "mode": "invalid_mode"},
-            "id": 1,
-        })
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "search",
+                "params": {"query": "test", "mode": "invalid_mode"},
+                "id": 1,
+            }
+        )
         response = orjson.loads(self._run(daemon._handle_request(payload)))
         assert response["error"]["code"] == -32602
 
     def test_handle_search_limit_too_large(self) -> None:
         """Search with limit > 1000 returns -32602."""
         daemon = self._make_daemon()
-        payload = orjson.dumps({
-            "jsonrpc": "2.0",
-            "method": "search",
-            "params": {"query": "test", "limit": 9999},
-            "id": 1,
-        })
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "search",
+                "params": {"query": "test", "limit": 9999},
+                "id": 1,
+            }
+        )
         response = orjson.loads(self._run(daemon._handle_request(payload)))
         assert response["error"]["code"] == -32602
 
     def test_handle_search_limit_zero(self) -> None:
         """Search with limit=0 returns -32602."""
         daemon = self._make_daemon()
-        payload = orjson.dumps({
-            "jsonrpc": "2.0",
-            "method": "search",
-            "params": {"query": "test", "limit": 0},
-            "id": 1,
-        })
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "search",
+                "params": {"query": "test", "limit": 0},
+                "id": 1,
+            }
+        )
         response = orjson.loads(self._run(daemon._handle_request(payload)))
         assert response["error"]["code"] == -32602
 
@@ -494,9 +490,7 @@ class TestHandleRequest:
         """_request_count increments for valid (parseable, known method) requests."""
         daemon = self._make_daemon()
         assert daemon._request_count == 0
-        payload = orjson.dumps(
-            {"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1}
-        )
+        payload = orjson.dumps({"jsonrpc": "2.0", "method": "ping", "params": {}, "id": 1})
         self._run(daemon._handle_request(payload))
         assert daemon._request_count == 1
 
@@ -510,6 +504,7 @@ class TestHandleRequest:
 # ---------------------------------------------------------------------------
 # get_daemon_status / stop_daemon tests (no real socket)
 # ---------------------------------------------------------------------------
+
 
 class TestDaemonHelpers:
     """Tests for module-level helper functions."""

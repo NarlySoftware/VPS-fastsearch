@@ -25,10 +25,10 @@ pytest tests/test_core.py::TestClassName::test_method -v
 ruff check vps_fastsearch/
 
 # Type check
-mypy vps_fastsearch/ --ignore-missing-imports
+mypy vps_fastsearch/ --strict --ignore-missing-imports
 
 # Format
-black vps_fastsearch/
+ruff format vps_fastsearch/
 
 # Integration tests (starts/stops daemon, requires models downloaded)
 python run_tests.py
@@ -67,11 +67,11 @@ SQLite with WAL mode. Three key structures:
 
 ### Daemon Protocol
 
-JSON-RPC 2.0 over Unix socket. Methods include `search`, `embed`, `rerank`, `status`, `reload`, `unload_model`. Client sends JSON + newline delimiter.
+JSON-RPC 2.0 over Unix socket. Methods include `search`, `embed`, `rerank`, `status`, `reload`, `unload_model`. Client sends 4-byte big-endian length header + JSON payload.
 
 ## Code Style
 
-- **Line length**: 100 (black + ruff)
+- **Line length**: 100 (ruff)
 - **Type hints**: Required on all functions (mypy strict with `disallow_untyped_defs`)
 - **Target Python**: 3.10+ (3.13 recommended)
 - **Ruff rules**: E, W, F, I (isort), B (bugbear), C4 (comprehensions), UP (pyupgrade)

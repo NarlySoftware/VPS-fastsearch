@@ -25,6 +25,7 @@ from vps_fastsearch.client import FastSearchClient
 def get_daemon_pid() -> int | None:
     """Get daemon PID from config-aware PID file path."""
     from vps_fastsearch.config import load_config
+
     config = load_config()
     pid_path = Path(config.daemon.pid_path)
     if not pid_path.exists():
@@ -47,14 +48,53 @@ def get_daemon_rss_kb() -> int | None:
 def generate_documents(count: int, avg_words: int = 50) -> list[str]:
     """Generate random text documents."""
     words = [
-        "search", "vector", "database", "index", "query", "embedding",
-        "machine", "learning", "neural", "network", "deep", "model",
-        "python", "server", "client", "daemon", "socket", "protocol",
-        "memory", "performance", "cache", "buffer", "thread", "async",
-        "token", "rank", "fusion", "hybrid", "score", "result",
-        "document", "chunk", "text", "content", "source", "file",
-        "algorithm", "optimization", "latency", "throughput", "batch",
-        "sqlite", "virtual", "table", "column", "row", "insert",
+        "search",
+        "vector",
+        "database",
+        "index",
+        "query",
+        "embedding",
+        "machine",
+        "learning",
+        "neural",
+        "network",
+        "deep",
+        "model",
+        "python",
+        "server",
+        "client",
+        "daemon",
+        "socket",
+        "protocol",
+        "memory",
+        "performance",
+        "cache",
+        "buffer",
+        "thread",
+        "async",
+        "token",
+        "rank",
+        "fusion",
+        "hybrid",
+        "score",
+        "result",
+        "document",
+        "chunk",
+        "text",
+        "content",
+        "source",
+        "file",
+        "algorithm",
+        "optimization",
+        "latency",
+        "throughput",
+        "batch",
+        "sqlite",
+        "virtual",
+        "table",
+        "column",
+        "row",
+        "insert",
     ]
     docs = []
     for i in range(count):
@@ -122,14 +162,25 @@ def main() -> None:
         }
         checkpoints.append(entry)
         label = f"{phase} {detail}".strip()
-        print(f"  [{len(checkpoints):3d}] {label:40s} RSS: {rss_now:>8,} KB ({rss_now / 1024:.1f} MB)")
+        if rss_now is not None:
+            print(
+                f"  [{len(checkpoints):3d}] {label:40s} RSS: {rss_now:>8,} KB ({rss_now / 1024:.1f} MB)"
+            )
+        else:
+            print(f"  [{len(checkpoints):3d}] {label:40s} RSS:      N/A")
 
     record("baseline")
 
     # ── Phase 1: Repeated index+search cycles with growing data ──
     print("\n── Phase 1: Index + Search (20 rounds, growing data) ──")
-    search_queries = ["search vector database", "machine learning model", "hybrid rank fusion",
-                      "python daemon socket", "memory performance cache", "algorithm optimization"]
+    search_queries = [
+        "search vector database",
+        "machine learning model",
+        "hybrid rank fusion",
+        "python daemon socket",
+        "memory performance cache",
+        "algorithm optimization",
+    ]
 
     for round_num in range(1, 21):
         doc_count = 20 + round_num * 10  # 30, 40, ..., 220 docs
@@ -139,7 +190,9 @@ def main() -> None:
         # Index via CLI (uses daemon)
         subprocess.run(
             [str(cli), "index", str(tmpdir), "--reindex"],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
 
         # Search burst
@@ -164,7 +217,10 @@ def main() -> None:
 
     # Get all sources
     stats_result = subprocess.run(
-        [str(cli), "stats"], capture_output=True, text=True, timeout=30,
+        [str(cli), "stats"],
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     print(f"  Stats before delete: {stats_result.stdout.strip()[:200]}")
 
@@ -175,14 +231,19 @@ def main() -> None:
         # Just delete all sources by finding them
         try:
             import apsw
+
             conn = apsw.Connection(str(db_path), flags=apsw.SQLITE_OPEN_READONLY)
-            sources = [row[0] for row in conn.cursor().execute("SELECT DISTINCT source FROM documents")]
+            sources = [
+                row[0] for row in conn.cursor().execute("SELECT DISTINCT source FROM documents")
+            ]
             conn.close()
             print(f"  Found {len(sources)} sources to delete")
             for src in sources:
                 subprocess.run(
                     [str(cli), "delete", src],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
                 )
         except Exception as e:
             print(f"  Could not enumerate sources: {e}")
@@ -200,7 +261,9 @@ def main() -> None:
     tmpdir = write_temp_files(docs, "reindex")
     subprocess.run(
         [str(cli), "index", str(tmpdir), "--reindex"],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     record("re-indexed", "50 docs")
     for f in tmpdir.iterdir():
@@ -227,10 +290,18 @@ def main() -> None:
 
     print(f"Baseline RSS:     {baseline_rss:>8,} KB ({baseline_rss / 1024:.1f} MB)")
     print(f"Peak RSS:         {peak_rss:>8,} KB ({peak_rss / 1024:.1f} MB)")
-    print(f"Post-delete RSS:  {post_delete_rss:>8,} KB ({post_delete_rss / 1024:.1f} MB)" if post_delete_rss else "Post-delete RSS:  N/A")
+    print(
+        f"Post-delete RSS:  {post_delete_rss:>8,} KB ({post_delete_rss / 1024:.1f} MB)"
+        if post_delete_rss
+        else "Post-delete RSS:  N/A"
+    )
     print(f"Final RSS:        {final_rss:>8,} KB ({final_rss / 1024:.1f} MB)")
-    print(f"Growth from base: {final_rss - baseline_rss:>+8,} KB ({(final_rss - baseline_rss) / 1024:+.1f} MB)")
-    print(f"Peak growth:      {peak_rss - baseline_rss:>+8,} KB ({(peak_rss - baseline_rss) / 1024:+.1f} MB)")
+    print(
+        f"Growth from base: {final_rss - baseline_rss:>+8,} KB ({(final_rss - baseline_rss) / 1024:+.1f} MB)"
+    )
+    print(
+        f"Peak growth:      {peak_rss - baseline_rss:>+8,} KB ({(peak_rss - baseline_rss) / 1024:+.1f} MB)"
+    )
 
     # Check for monotonic growth in Phase 1 (leak indicator)
     phase1 = [c for c in checkpoints if c["phase"] == "round"]
@@ -239,10 +310,14 @@ def main() -> None:
         first5_avg = sum(c["rss_kb"] for c in phase1[:5]) / 5
         last5_avg = sum(c["rss_kb"] for c in phase1[-5:]) / 5
         growth_pct = ((last5_avg - first5_avg) / first5_avg) * 100
-        print(f"\nPhase 1 trend:    first 5 avg={first5_avg / 1024:.1f} MB, last 5 avg={last5_avg / 1024:.1f} MB ({growth_pct:+.1f}%)")
+        print(
+            f"\nPhase 1 trend:    first 5 avg={first5_avg / 1024:.1f} MB, last 5 avg={last5_avg / 1024:.1f} MB ({growth_pct:+.1f}%)"
+        )
 
         # Count consecutive increases
-        increases = sum(1 for i in range(1, len(phase1)) if phase1[i]["rss_kb"] > phase1[i - 1]["rss_kb"])
+        increases = sum(
+            1 for i in range(1, len(phase1)) if phase1[i]["rss_kb"] > phase1[i - 1]["rss_kb"]
+        )
         print(f"Consecutive rises: {increases}/{len(phase1) - 1}")
 
     # Memory returned after delete?

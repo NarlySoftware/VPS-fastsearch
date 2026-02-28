@@ -58,9 +58,12 @@ class Embedder:
                 break
             except Exception as e:
                 if attempt < 2 and ("connection" in str(e).lower() or "timeout" in str(e).lower()):
-                    wait = 3 * (2 ** attempt)  # 3, 6, 12 seconds
-                    logger.warning(f"Model download attempt {attempt + 1}/3 failed, retrying in {wait}s: {e}")
+                    wait = 3 * (2**attempt)  # 3, 6, 12 seconds
+                    logger.warning(
+                        f"Model download attempt {attempt + 1}/3 failed, retrying in {wait}s: {e}"
+                    )
                     import time
+
                     time.sleep(wait)
                 else:
                     raise
@@ -125,9 +128,12 @@ class Reranker:
                 break
             except Exception as e:
                 if attempt < 2 and ("connection" in str(e).lower() or "timeout" in str(e).lower()):
-                    wait = 3 * (2 ** attempt)  # 3, 6, 12 seconds
-                    logger.warning(f"Model download attempt {attempt + 1}/3 failed, retrying in {wait}s: {e}")
+                    wait = 3 * (2**attempt)  # 3, 6, 12 seconds
+                    logger.warning(
+                        f"Model download attempt {attempt + 1}/3 failed, retrying in {wait}s: {e}"
+                    )
                     import time
+
                     time.sleep(wait)
                 else:
                     raise
@@ -195,6 +201,7 @@ class SearchDB:
     def __init__(self, db_path: str | Path | None = None) -> None:
         if db_path is None:
             from .config import DEFAULT_DB_PATH
+
             db_path = os.environ.get("FASTSEARCH_DB", DEFAULT_DB_PATH)
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -208,7 +215,9 @@ class SearchDB:
         # Enable WAL mode for concurrent read/write access
         result = list(self._execute("PRAGMA journal_mode=WAL"))
         if result and result[0][0].lower() != "wal":
-            logger.warning(f"WAL mode not available (got {result[0][0]}). Performance may be degraded on network/FUSE filesystems.")
+            logger.warning(
+                f"WAL mode not available (got {result[0][0]}). Performance may be degraded on network/FUSE filesystems."
+            )
         # Wait up to 5 seconds if database is locked
         self._execute("PRAGMA busy_timeout=5000")
         self._execute("PRAGMA cache_size = -4000")  # 4MB cache
@@ -219,7 +228,9 @@ class SearchDB:
         try:
             list(self._execute("PRAGMA quick_check(1)"))
         except Exception as e:
-            logger.error(f"Database may be corrupted: {e}. Consider deleting {self.db_path} and re-indexing.")
+            logger.error(
+                f"Database may be corrupted: {e}. Consider deleting {self.db_path} and re-indexing."
+            )
             raise
 
         self._init_schema()
@@ -245,8 +256,7 @@ class SearchDB:
         self._execute("CREATE INDEX IF NOT EXISTS idx_docs_source ON docs(source)")
 
         self._execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_docs_source_chunk "
-            "ON docs(source, chunk_index)"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_docs_source_chunk ON docs(source, chunk_index)"
         )
 
         # FTS5 virtual table
@@ -324,9 +334,7 @@ class SearchDB:
         Returns the document ID.
         """
         if len(embedding) != self.EMBEDDING_DIM:
-            raise ValueError(
-                f"Expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}"
-            )
+            raise ValueError(f"Expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}")
         self.conn.execute("BEGIN")
         try:
             # Insert into main docs table (triggers handle FTS)
@@ -451,15 +459,17 @@ class SearchDB:
         results = []
         for rank, row in enumerate(cursor, 1):
             doc_id, source, chunk_index, content, metadata, score = row
-            results.append({
-                "id": doc_id,
-                "source": source,
-                "chunk_index": chunk_index,
-                "content": content,
-                "metadata": orjson.loads(metadata) if metadata else {},
-                "score": score,
-                "rank": rank,
-            })
+            results.append(
+                {
+                    "id": doc_id,
+                    "source": source,
+                    "chunk_index": chunk_index,
+                    "content": content,
+                    "metadata": orjson.loads(metadata) if metadata else {},
+                    "score": score,
+                    "rank": rank,
+                }
+            )
 
         return results
 
@@ -480,9 +490,7 @@ class SearchDB:
         limit = min(limit, self.MAX_SEARCH_LIMIT)
 
         if len(embedding) != self.EMBEDDING_DIM:
-            raise ValueError(
-                f"Expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}"
-            )
+            raise ValueError(f"Expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}")
         cursor = self._execute(
             """
             SELECT
@@ -504,15 +512,17 @@ class SearchDB:
         results = []
         for rank, row in enumerate(cursor, 1):
             doc_id, distance, source, chunk_index, content, metadata = row
-            results.append({
-                "id": doc_id,
-                "source": source,
-                "chunk_index": chunk_index,
-                "content": content,
-                "metadata": orjson.loads(metadata) if metadata else {},
-                "distance": distance,
-                "rank": rank,
-            })
+            results.append(
+                {
+                    "id": doc_id,
+                    "source": source,
+                    "chunk_index": chunk_index,
+                    "content": content,
+                    "metadata": orjson.loads(metadata) if metadata else {},
+                    "distance": distance,
+                    "rank": rank,
+                }
+            )
 
         return results
 
@@ -570,10 +580,7 @@ class SearchDB:
             bm25_rank = bm25_ranks.get(doc_id, default_rank)
             vec_rank = vec_ranks.get(doc_id, default_rank)
 
-            rrf_score = (
-                bm25_weight * (1 / (k + bm25_rank)) +
-                vec_weight * (1 / (k + vec_rank))
-            )
+            rrf_score = bm25_weight * (1 / (k + bm25_rank)) + vec_weight * (1 / (k + vec_rank))
 
             result = result_lookup[doc_id].copy()
             result["rrf_score"] = rrf_score
@@ -659,9 +666,7 @@ class SearchDB:
 
     def delete_source(self, source: str) -> int:
         """Delete all chunks from a source. Returns count deleted."""
-        count = list(self._execute(
-            "SELECT COUNT(*) FROM docs WHERE source = ?", (source,)
-        ))[0][0]
+        count = list(self._execute("SELECT COUNT(*) FROM docs WHERE source = ?", (source,)))[0][0]
 
         if count:
             self.conn.execute("BEGIN")

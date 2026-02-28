@@ -29,8 +29,8 @@ def chunk_text(
         return
 
     # Normalize whitespace but preserve paragraph breaks
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    paragraphs = re.split(r'\n\n+', text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    paragraphs = re.split(r"\n\n+", text)
     paragraphs = [p.strip() for p in paragraphs if p.strip()]
 
     if not paragraphs:
@@ -94,10 +94,10 @@ def _split_long_paragraph(
     """Split a long paragraph by sentences."""
     # Split by sentence boundaries
     sentences = re.split(
-        r'(?<=[.!?])'           # After sentence-ending punctuation
-        r'(?<!\b[A-Z]\.)'       # Not after single capital letter (initials like "J.")
-        r'(?<!\b(?:Dr|Mr|Ms|Mrs|Prof|Sr|Jr|vs|etc|Inc|Ltd|St|Ave|Rd|Vol|No|Fig|approx)\.)'
-        r'\s+',
+        r"(?<=[.!?])"  # After sentence-ending punctuation
+        r"(?<!\b[A-Z]\.)"  # Not after single capital letter (initials like "J.")
+        r"(?<!\b(?:Dr|Mr|Ms|Mrs|Prof|Sr|Jr|vs|etc|Inc|Ltd|St|Ave|Rd|Vol|No|Fig|approx)\.)"
+        r"\s+",
         text,
     )
 
@@ -143,7 +143,7 @@ def chunk_markdown(
         return
 
     # Split by headers (keeping the header with its content)
-    sections = re.split(r'(?=^#{1,6}\s)', text, flags=re.MULTILINE)
+    sections = re.split(r"(?=^#{1,6}\s)", text, flags=re.MULTILINE)
 
     current_section = ""
 
@@ -152,7 +152,7 @@ def chunk_markdown(
             continue
 
         # Extract section header if present
-        header_match = re.match(r'^(#{1,6})\s+(.+?)(?:\n|$)', section)
+        header_match = re.match(r"^(#{1,6})\s+(.+?)(?:\n|$)", section)
         if header_match:
             current_section = header_match.group(2).strip()
 

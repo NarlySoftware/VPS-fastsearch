@@ -18,7 +18,9 @@ from .core import Embedder, SearchDB
 @click.group()
 @click.version_option(version=__version__, prog_name="vps-fastsearch")
 @click.option("--db", default=DEFAULT_DB_PATH, help="Database path", envvar="FASTSEARCH_DB")
-@click.option("--config", "config_path", default=None, help="Config file path", envvar="FASTSEARCH_CONFIG")
+@click.option(
+    "--config", "config_path", default=None, help="Config file path", envvar="FASTSEARCH_CONFIG"
+)
 @click.pass_context
 def cli(ctx: click.Context, db: str, config_path: str | None) -> None:
     """VPS-FastSearch - Fast memory/vector search for CPU-only VPS."""
@@ -30,6 +32,7 @@ def cli(ctx: click.Context, db: str, config_path: str | None) -> None:
 # ============================================================================
 # Daemon Commands
 # ============================================================================
+
 
 @cli.group()
 def daemon() -> None:
@@ -106,7 +109,9 @@ def daemon_status(ctx: click.Context, config_path: str | None, output_json: bool
         click.echo("=" * 40)
         click.echo(f"Uptime:         {hours}h {minutes}m {seconds}s")
         click.echo(f"Requests:       {status.get('request_count', 0)}")
-        click.echo(f"Memory:         {status.get('total_memory_mb', 0):.0f}MB / {status.get('max_memory_mb', 0)}MB")
+        click.echo(
+            f"Memory:         {status.get('total_memory_mb', 0):.0f}MB / {status.get('max_memory_mb', 0)}MB"
+        )
         click.echo(f"Socket:         {status.get('socket_path', 'N/A')}")
         click.echo()
 
@@ -141,6 +146,7 @@ def daemon_reload(ctx: click.Context, config_path: str | None) -> None:
 # Config Commands
 # ============================================================================
 
+
 @cli.group()
 def config() -> None:
     """Manage configuration."""
@@ -172,6 +178,7 @@ def config_path() -> None:
 # ============================================================================
 # Index Commands
 # ============================================================================
+
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True))
@@ -283,6 +290,7 @@ def index(ctx: click.Context, path: str, glob: str, reindex: bool) -> None:
 # Search Commands
 # ============================================================================
 
+
 @cli.command()
 @click.argument("query")
 @click.option("--limit", "-n", default=5, help="Number of results")
@@ -291,7 +299,15 @@ def index(ctx: click.Context, path: str, glob: str, reindex: bool) -> None:
 @click.option("--no-daemon", is_flag=True, help="Force direct mode (no daemon)")
 @click.option("--json", "output_json", is_flag=True, help="Output as JSON")
 @click.pass_context
-def search(ctx: click.Context, query: str, limit: int, mode: str, rerank: bool, no_daemon: bool, output_json: bool) -> None:
+def search(
+    ctx: click.Context,
+    query: str,
+    limit: int,
+    mode: str,
+    rerank: bool,
+    no_daemon: bool,
+    output_json: bool,
+) -> None:
     """Search indexed documents."""
     db_path = ctx.obj["db_path"]
     config_path = ctx.obj.get("config_path")
@@ -347,7 +363,9 @@ def search(ctx: click.Context, query: str, limit: int, mode: str, rerank: bool, 
             if rerank:
                 try:
                     results = db.search_hybrid_reranked(
-                        query, embedding, limit=limit,
+                        query,
+                        embedding,
+                        limit=limit,
                         rerank_top_k=min(limit * 3, 30),
                     )
                 except ImportError as e:
@@ -373,7 +391,9 @@ def search(ctx: click.Context, query: str, limit: int, mode: str, rerank: bool, 
     else:
         daemon_info = " [daemon]" if use_daemon else ""
         rerank_info = " +rerank" if rerank else ""
-        click.echo(f"Search: '{query}' ({mode}{rerank_info}{daemon_info}, {search_time*1000:.0f}ms)\n")
+        click.echo(
+            f"Search: '{query}' ({mode}{rerank_info}{daemon_info}, {search_time * 1000:.0f}ms)\n"
+        )
 
         for r in results:
             source = Path(r["source"]).name
@@ -401,6 +421,7 @@ def search(ctx: click.Context, query: str, limit: int, mode: str, rerank: bool, 
 # ============================================================================
 # Stats Commands
 # ============================================================================
+
 
 @cli.command()
 @click.pass_context

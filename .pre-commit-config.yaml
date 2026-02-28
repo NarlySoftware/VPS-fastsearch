@@ -1,0 +1,18 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy vps_fastsearch/
+        language: system
+        args: [--strict, --ignore-missing-imports]
+        types: [python]
+        pass_filenames: false
+        files: ^vps_fastsearch/
