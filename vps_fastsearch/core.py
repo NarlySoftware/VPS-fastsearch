@@ -198,9 +198,6 @@ class SearchDB:
     EMBEDDING_DIM = 768
     MAX_SEARCH_LIMIT = 10000
 
-    # Allowed types for metadata filter values
-    _METADATA_FILTER_TYPES = (str, int, float, bool)
-
     @staticmethod
     def _build_metadata_filter(
         metadata_filter: dict[str, Any] | None,
@@ -722,7 +719,7 @@ class SearchDB:
         limit: int = 10,
         rerank_top_k: int = 20,
         reranker: Any = None,
-        metadata_filter: dict[str, str] | None = None,
+        metadata_filter: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Hybrid search with cross-encoder reranking.
@@ -812,17 +809,16 @@ class SearchDB:
 
     def delete_by_id(self, doc_id: int) -> bool:
         """Delete a single document by ID. Returns True if a row was deleted."""
-        # Check existence first so we know whether anything was deleted
-        row = list(self._execute("SELECT id FROM docs WHERE id = ?", (doc_id,)))
-        if not row:
-            return False
-
         self.conn.execute("BEGIN")
         try:
             # Delete from vector table first (no trigger for this)
             self._execute("DELETE FROM docs_vec WHERE id = ?", (doc_id,))
             # Delete from docs (triggers handle FTS sync)
             self._execute("DELETE FROM docs WHERE id = ?", (doc_id,))
+            affected = self.conn.changes()
+            if affected == 0:
+                self.conn.execute("ROLLBACK")
+                return False
             self.conn.execute("COMMIT")
         except Exception:
             try:
@@ -838,10 +834,6 @@ class SearchDB:
         if len(embedding) != self.EMBEDDING_DIM:
             raise ValueError(f"Expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}")
 
-        row = list(self._execute("SELECT id FROM docs WHERE id = ?", (doc_id,)))
-        if not row:
-            return False
-
         self.conn.execute("BEGIN")
         try:
             # Update docs table (trigger handles FTS delete-old + insert-new)
@@ -849,6 +841,10 @@ class SearchDB:
                 "UPDATE docs SET content = ? WHERE id = ?",
                 (content, doc_id),
             )
+            affected = self.conn.changes()
+            if affected == 0:
+                self.conn.execute("ROLLBACK")
+                return False
             # Update vector table — sqlite-vec vec0 doesn't support UPDATE, so
             # delete + re-insert.  Use positional VALUES (not named columns)
             # to work around a vec0 quirk after DELETE in the same transaction.

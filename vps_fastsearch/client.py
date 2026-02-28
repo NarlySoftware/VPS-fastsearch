@@ -94,7 +94,21 @@ class FastSearchClient:
             self._sock = None
 
     def _send_request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Send JSON-RPC request and get response."""
+        """
+        Send JSON-RPC request and get response.
+
+        This method implements automatic retry on connection failures (TimeoutError, OSError).
+        On the first failure, it closes the connection and retries once after reconnecting.
+
+        WARNING: Non-idempotent operations may execute twice:
+        - If the first request times out AFTER being processed by the daemon but BEFORE
+          the response is received, the retry will execute the operation again.
+        - This affects: batch_index, delete, update_content
+        - Idempotent operations (search, embed, status) are safe to retry.
+
+        For non-idempotent operations, ensure your application layer handles potential
+        duplicates (e.g., via database constraints, idempotency keys, or duplicate detection).
+        """
         request = {
             "jsonrpc": "2.0",
             "method": method,
@@ -158,7 +172,10 @@ class FastSearchClient:
                         "Invalid JSON-RPC response from daemon: missing 'result' and 'error'"
                     )
 
-                return dict(response["result"])
+                result = response["result"]
+                if not isinstance(result, dict):
+                    raise FastSearchError(f"Unexpected result type: {type(result).__name__}")
+                return dict(result)
 
             except (TimeoutError, OSError) as e:
                 self._disconnect()
@@ -304,6 +321,11 @@ class FastSearchClient:
         """
         Batch index documents into the database.
 
+        This operation is NOT idempotent: if the daemon processes the request but the
+        response is lost due to connection timeout, the retry will index the documents
+        again, potentially creating duplicates. Use database constraints or application
+        logic to detect and handle duplicate indexing.
+
         Args:
             db_path: Path to database file
             documents: List of document dicts, each with keys:
@@ -318,6 +340,9 @@ class FastSearchClient:
             - indexed: Count of documents indexed
             - doc_ids: List of assigned document IDs
             - index_time_ms: Indexing latency
+
+        Raises:
+            FastSearchError: On indexing failure or connection loss after 2 attempts
         """
         return self._send_request(
             "batch_index",
@@ -336,6 +361,12 @@ class FastSearchClient:
         """
         Delete documents by source name or by document ID.
 
+        This operation is NOT idempotent: if the daemon processes the request but the
+        response is lost due to connection timeout, the retry will attempt deletion again.
+        Deleting by doc_id is safe (delete fails gracefully if ID doesn't exist), but
+        deleting by source may have implications if source records are recreated. Ensure
+        idempotency checks at the application level if needed.
+
         Args:
             source: Source name to delete all chunks for
             doc_id: Single document ID to delete
@@ -343,6 +374,9 @@ class FastSearchClient:
 
         Returns:
             dict with deleted count and source/id
+
+        Raises:
+            FastSearchError: On deletion failure or connection loss after 2 attempts
         """
         params: dict[str, Any] = {}
         if source is not None:
@@ -364,6 +398,11 @@ class FastSearchClient:
 
         The daemon re-embeds the new content automatically.
 
+        This operation is NOT idempotent: if the daemon processes the request but the
+        response is lost due to connection timeout, the retry will update the content again,
+        which should be safe due to overwrite semantics (same content written twice).
+        However, ensure your application logs or tracks updates if audit trails are needed.
+
         Args:
             doc_id: Document ID to update
             content: New content text
@@ -371,6 +410,9 @@ class FastSearchClient:
 
         Returns:
             dict with updated status and id
+
+        Raises:
+            FastSearchError: On update failure or connection loss after 2 attempts
         """
         params: dict[str, Any] = {"id": doc_id, "content": content}
         if db_path is not None:

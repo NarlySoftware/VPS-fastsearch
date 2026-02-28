@@ -47,7 +47,7 @@ python run_tests.py
 
 - **client.py** — `FastSearchClient` communicates with daemon over Unix socket. Auto-reconnect and context manager support.
 
-- **cli.py** — Click-based CLI (`vps-fastsearch`). Subcommands: `daemon`, `index`, `search`, `config`.
+- **cli.py** — Click-based CLI (`vps-fastsearch`). Subcommands: `daemon`, `index`, `search`, `config`, `stats`, `delete`, `list`.
 
 - **config.py** — YAML configuration at `~/.config/fastsearch/config.yaml` with XDG compliance and environment variable overrides.
 
@@ -60,14 +60,15 @@ Uses **Reciprocal Rank Fusion (RRF)** to merge BM25 and vector results:
 
 ### Database Schema
 
-SQLite with WAL mode. Three key structures:
-1. `documents` table (id, source, chunk_index, content, embedding as float32 blob)
-2. `documents_fts` FTS5 virtual table with porter unicode61 tokenizer (auto-synced via triggers)
-3. sqlite-vec virtual table for 768-dim cosine similarity search
+SQLite with WAL mode. Four key structures:
+1. `docs` table (id, source, chunk_index, content, metadata, created_at)
+2. `docs_fts` FTS5 virtual table with porter unicode61 tokenizer (auto-synced via triggers)
+3. `docs_vec` sqlite-vec virtual table for 768-dim cosine similarity search
+4. `db_meta` key-value table for database-level settings (e.g., `base_dir` for relative path resolution)
 
 ### Daemon Protocol
 
-JSON-RPC 2.0 over Unix socket. Methods include `search`, `embed`, `rerank`, `status`, `reload`, `unload_model`. Client sends 4-byte big-endian length header + JSON payload.
+JSON-RPC 2.0 over Unix socket. 13 methods: `ping`, `status`, `search`, `embed`, `rerank`, `load_model`, `unload_model`, `reload_config`, `batch_index`, `delete`, `update_content`, `list_sources`, `shutdown`. Client sends 4-byte big-endian length header + JSON payload.
 
 ## Code Style
 
@@ -76,6 +77,14 @@ JSON-RPC 2.0 over Unix socket. Methods include `search`, `embed`, `rerank`, `sta
 - **Target Python**: 3.10+ (3.13 recommended)
 - **Ruff rules**: E, W, F, I (isort), B (bugbear), C4 (comprehensions), UP (pyupgrade)
 - **APSW** is used instead of stdlib `sqlite3` for SQLite bindings
+
+## Notable Features
+
+- **Metadata filtering**: Search supports `--filter key=value` (CLI) or `metadata_filter` param (RPC) for exact-match filtering on JSON metadata fields. Multiple filters use AND logic.
+- **Batch indexing**: `batch_index` RPC method accepts up to 1000 documents per call with validation.
+- **Delete/update**: `delete` (by source or ID) and `update_content` (by ID, auto-generates new embedding) available via CLI and RPC.
+- **Relative paths**: Source paths stored relative to a configurable `base_dir` (stored in `db_meta` table). Supports `--base-dir` CLI option and `to_relative`/`to_absolute` methods on SearchDB.
+- **List sources**: `list` CLI command and `list_sources` RPC method show all indexed sources with chunk counts and ID ranges.
 
 ## Key Dependencies
 

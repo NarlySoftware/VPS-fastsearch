@@ -746,6 +746,318 @@ class TestHandleBatchIndex:
 
 
 # ---------------------------------------------------------------------------
+# delete handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleDelete:
+    """Tests for the delete RPC handler."""
+
+    def _make_daemon(self) -> FastSearchDaemon:
+        config = _make_config()
+        return FastSearchDaemon(config)
+
+    def _run(self, coro: Any) -> Any:
+        return asyncio.run(coro)
+
+    def test_delete_by_source_valid(self, tmp_path: Any) -> None:
+        """delete with a valid source deletes matching documents."""
+        daemon = self._make_daemon()
+        db_path = str(tmp_path / "test.db")
+
+        mock_db = MagicMock()
+        mock_db.delete_source.return_value = 3
+        db_lock = threading.Lock()
+        with patch.object(daemon, "_get_db", return_value=(mock_db, db_lock)):
+            payload = orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "delete",
+                    "params": {"db_path": db_path, "source": "notes.txt"},
+                    "id": 1,
+                }
+            )
+            response = orjson.loads(self._run(daemon._handle_request(payload)))
+
+        assert "result" in response
+        assert response["result"]["deleted"] == 3
+        assert response["result"]["source"] == "notes.txt"
+        mock_db.delete_source.assert_called_once_with("notes.txt")
+
+    def test_delete_by_id_valid(self, tmp_path: Any) -> None:
+        """delete with a valid id deletes the document."""
+        daemon = self._make_daemon()
+        db_path = str(tmp_path / "test.db")
+
+        mock_db = MagicMock()
+        mock_db.delete_by_id.return_value = True
+        db_lock = threading.Lock()
+        with patch.object(daemon, "_get_db", return_value=(mock_db, db_lock)):
+            payload = orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "delete",
+                    "params": {"db_path": db_path, "id": 42},
+                    "id": 1,
+                }
+            )
+            response = orjson.loads(self._run(daemon._handle_request(payload)))
+
+        assert "result" in response
+        assert response["result"]["deleted"] == 1
+        assert response["result"]["id"] == 42
+        mock_db.delete_by_id.assert_called_once_with(42)
+
+    def test_delete_both_source_and_id_error(self) -> None:
+        """delete with both source and id returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "delete",
+                "params": {"source": "notes.txt", "id": 1},
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "not both" in response["error"]["message"]
+
+    def test_delete_neither_source_nor_id_error(self) -> None:
+        """delete with neither source nor id returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "delete",
+                "params": {},
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "Missing" in response["error"]["message"]
+
+    def test_delete_source_not_string_error(self) -> None:
+        """delete with non-string source returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "delete",
+                "params": {"source": 123},
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "source" in response["error"]["message"]
+
+    def test_delete_id_not_int_error(self) -> None:
+        """delete with non-integer id returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "delete",
+                "params": {"id": "abc"},
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "id" in response["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# update_content handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleUpdateContent:
+    """Tests for the update_content RPC handler."""
+
+    def _make_daemon(self) -> FastSearchDaemon:
+        config = _make_config()
+        return FastSearchDaemon(config)
+
+    def _run(self, coro: Any) -> Any:
+        return asyncio.run(coro)
+
+    def test_update_content_valid(self, tmp_path: Any) -> None:
+        """update_content with valid id and content succeeds."""
+        daemon = self._make_daemon()
+        db_path = str(tmp_path / "test.db")
+
+        mock_db = MagicMock()
+        mock_db.update_content.return_value = True
+        db_lock = threading.Lock()
+
+        # Mock the model manager to return a mock embedder
+        mock_embedder = MagicMock()
+        mock_embedding = MagicMock()
+        mock_embedding.tolist.return_value = [0.1] * 768
+        mock_embedder.instance.embed.return_value = iter([mock_embedding])
+
+        async def mock_load_model(slot: str) -> Any:
+            return mock_embedder
+
+        async def mock_release_model(slot: str) -> None:
+            pass
+
+        daemon.model_manager.load_model = mock_load_model  # type: ignore[method-assign]
+        daemon.model_manager.release_model = mock_release_model  # type: ignore[method-assign]
+
+        with patch.object(daemon, "_get_db", return_value=(mock_db, db_lock)):
+            payload = orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "update_content",
+                    "params": {
+                        "db_path": db_path,
+                        "id": 5,
+                        "content": "updated text",
+                    },
+                    "id": 1,
+                }
+            )
+            response = orjson.loads(self._run(daemon._handle_request(payload)))
+
+        assert "result" in response
+        assert response["result"]["updated"] is True
+        assert response["result"]["id"] == 5
+        mock_db.update_content.assert_called_once_with(5, "updated text", [0.1] * 768)
+
+    def test_update_content_missing_id_error(self) -> None:
+        """update_content without id returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "update_content",
+                "params": {"content": "new text"},
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "id" in response["error"]["message"]
+
+    def test_update_content_non_int_id_error(self) -> None:
+        """update_content with non-integer id returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "update_content",
+                "params": {"id": "five", "content": "new text"},
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "id" in response["error"]["message"]
+
+    def test_update_content_missing_content_error(self) -> None:
+        """update_content without content returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "update_content",
+                "params": {"id": 5},
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "content" in response["error"]["message"]
+
+    def test_update_content_empty_content_error(self) -> None:
+        """update_content with empty string content returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "update_content",
+                "params": {"id": 5, "content": ""},
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "content" in response["error"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# list_sources handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleListSources:
+    """Tests for the list_sources RPC handler."""
+
+    def _make_daemon(self) -> FastSearchDaemon:
+        config = _make_config()
+        return FastSearchDaemon(config)
+
+    def _run(self, coro: Any) -> Any:
+        return asyncio.run(coro)
+
+    def test_list_sources_returns_results(self, tmp_path: Any) -> None:
+        """list_sources returns source list and count."""
+        daemon = self._make_daemon()
+        db_path = str(tmp_path / "test.db")
+
+        mock_db = MagicMock()
+        mock_db.list_sources.return_value = [
+            {"source": "a.txt", "chunk_count": 3},
+            {"source": "b.txt", "chunk_count": 1},
+        ]
+        db_lock = threading.Lock()
+        with patch.object(daemon, "_get_db", return_value=(mock_db, db_lock)):
+            payload = orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "list_sources",
+                    "params": {"db_path": db_path},
+                    "id": 1,
+                }
+            )
+            response = orjson.loads(self._run(daemon._handle_request(payload)))
+
+        assert "result" in response
+        assert response["result"]["count"] == 2
+        assert len(response["result"]["sources"]) == 2
+        assert response["result"]["sources"][0]["source"] == "a.txt"
+        mock_db.list_sources.assert_called_once()
+
+    def test_list_sources_custom_db_path(self, tmp_path: Any) -> None:
+        """list_sources uses the provided db_path."""
+        daemon = self._make_daemon()
+        db_path = str(tmp_path / "custom.db")
+
+        mock_db = MagicMock()
+        mock_db.list_sources.return_value = []
+        db_lock = threading.Lock()
+        with patch.object(daemon, "_get_db", return_value=(mock_db, db_lock)) as mock_get_db:
+            payload = orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "list_sources",
+                    "params": {"db_path": db_path},
+                    "id": 1,
+                }
+            )
+            response = orjson.loads(self._run(daemon._handle_request(payload)))
+
+        assert "result" in response
+        assert response["result"]["count"] == 0
+        assert response["result"]["sources"] == []
+        mock_get_db.assert_called_once_with(db_path)
+
+
+# ---------------------------------------------------------------------------
 # get_daemon_status / stop_daemon tests (no real socket)
 # ---------------------------------------------------------------------------
 

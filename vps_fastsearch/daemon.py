@@ -223,7 +223,7 @@ class ModelManager:
                 logger.warning("Cannot evict: all models are 'always' loaded")
                 break
 
-            await self.unload_model(evict_slot)
+            await self._unload_model_unlocked(evict_slot)
             # If model wasn't actually unloaded (ref_count > 0), stop trying
             if evict_slot in self._models:
                 logger.warning(f"Cannot evict {evict_slot}: still has active references")
@@ -231,7 +231,12 @@ class ModelManager:
             current_usage = self.get_memory_usage()
 
     async def unload_model(self, slot: str) -> None:
-        """Unload a model from memory."""
+        """Unload a model from memory (acquires _load_lock)."""
+        async with self._load_lock:
+            await self._unload_model_unlocked(slot)
+
+    async def _unload_model_unlocked(self, slot: str) -> None:
+        """Unload a model from memory. Caller must hold _load_lock."""
         if slot not in self._models:
             return
 
@@ -475,9 +480,7 @@ class FastSearchDaemon:
 
                 def _search_bm25() -> list[dict[str, Any]]:
                     with db_lock:
-                        return db.search_bm25(
-                            query, limit=limit, metadata_filter=metadata_filter
-                        )
+                        return db.search_bm25(query, limit=limit, metadata_filter=metadata_filter)
 
                 results = await loop.run_in_executor(None, _search_bm25)
             elif mode == "vector":

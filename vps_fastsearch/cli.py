@@ -447,20 +447,34 @@ def search(
         search_time = time.perf_counter() - t0
 
         # Resolve relative source paths back to absolute for display.
-        resolve_db: SearchDB | None
+        # When using the daemon we avoid opening a full SearchDB (with all its
+        # PRAGMAs and schema init) just to read `base_dir`.  Instead we query
+        # the `db_meta` table directly with a lightweight apsw connection.
         if use_daemon:
+            base_dir: Path | None = None
             if Path(db_path).exists():
-                resolve_db = SearchDB(db_path)
-            else:
-                resolve_db = None
+                import apsw
+
+                _conn = apsw.Connection(str(db_path))
+                try:
+                    _cur = _conn.execute("SELECT value FROM db_meta WHERE key = 'base_dir'")
+                    _row = _cur.fetchone()
+                    base_dir = Path(_row[0]) if _row else Path(db_path).parent
+                except apsw.SQLError:
+                    # db_meta table may not exist in older schema
+                    base_dir = Path(db_path).parent
+                finally:
+                    _conn.close()
+
+            if base_dir is not None:
+                for r in results:
+                    p = Path(r["source"])
+                    r["source_abs"] = str(p) if p.is_absolute() else str((base_dir / p).resolve())
         else:
-            resolve_db = db
+            for r in results:
+                r["source_abs"] = db.to_absolute(r["source"])
 
         try:
-            if resolve_db is not None:
-                for r in results:
-                    r["source_abs"] = resolve_db.to_absolute(r["source"])
-
             if output_json:
                 output = {
                     "query": query,
@@ -501,9 +515,9 @@ def search(
                     click.echo(f"[{r['rank']}] {source} (chunk {r['chunk_index']}) - {score_info}")
                     click.echo(f"    {preview}\n")
         finally:
-            # Close DB connections
-            if resolve_db is not None:
-                resolve_db.close()
+            # Close DB connection (only exists in direct/non-daemon path)
+            if not use_daemon:
+                db.close()
     finally:
         # Clean up client if not closed yet (e.g., ping succeeded but search skipped)
         if client is not None:

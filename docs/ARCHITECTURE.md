@@ -19,7 +19,7 @@ daemon for low-latency queries.
                           vps-fastsearch CLI (cli.py)
                                     |
                                     | Click commands: daemon, index, search,
-                                    |                 config, stats, delete
+                                    |                 config, stats, delete, list
                                     v
                          FastSearchClient (client.py)
                                     |
@@ -179,6 +179,7 @@ Search indexed documents.
 | `limit`   | int    | `10`                  | Max results (1--1000)                       |
 | `mode`    | string | `"hybrid"`            | `"bm25"`, `"vector"`, or `"hybrid"`         |
 | `rerank`  | bool   | `false`               | Apply cross-encoder reranking (hybrid only) |
+| `metadata_filter` | object | `null`       | Key-value pairs for exact metadata match (AND logic) |
 
 - **Returns**:
 
@@ -294,6 +295,91 @@ Reload the daemon configuration from disk without restarting.
 - **Returns**: `{ "reloaded": true, "socket_path": "/tmp/fastsearch.sock" }`
 
 Also triggered by sending `SIGHUP` to the daemon process.
+
+#### `batch_index`
+
+Batch index multiple documents into the database.
+
+- **Params**:
+
+| Param       | Type     | Default           | Description                                   |
+|-------------|----------|-------------------|-----------------------------------------------|
+| `db_path`   | string   | `DEFAULT_DB_PATH` | Path to SQLite database                       |
+| `documents` | object[] | (required)        | List of document objects (max 1000)           |
+
+Each document object must contain:
+
+| Field         | Type     | Description                                  |
+|---------------|----------|----------------------------------------------|
+| `source`      | string   | Source file path or identifier (non-empty)   |
+| `chunk_index` | int      | Zero-based chunk position within source      |
+| `content`     | string   | Text content of the chunk                    |
+| `embedding`   | float[]  | 768-dimensional embedding vector             |
+| `metadata`    | object   | Optional JSON metadata                       |
+
+- **Returns**:
+
+```json
+{
+    "indexed": 5,
+    "doc_ids": [1, 2, 3, 4, 5],
+    "index_time_ms": 12.5
+}
+```
+
+#### `delete`
+
+Delete documents by source path or by individual document ID.
+
+- **Params**:
+
+| Param    | Type   | Default           | Description                                  |
+|----------|--------|-------------------|----------------------------------------------|
+| `db_path`| string | `DEFAULT_DB_PATH` | Path to SQLite database                      |
+| `source` | string | `null`            | Source path to delete all chunks for          |
+| `id`     | int    | `null`            | Single document ID to delete                 |
+
+Exactly one of `source` or `id` must be provided.
+
+- **Returns** (by source): `{ "deleted": 5, "source": "/path/to/file.md" }`
+- **Returns** (by ID): `{ "deleted": 1, "id": 42 }` (deleted is 0 if not found)
+
+#### `update_content`
+
+Update the content and embedding for an existing document by ID. The daemon automatically
+generates a new embedding for the provided content using the loaded embedder model.
+
+- **Params**:
+
+| Param    | Type   | Default           | Description                            |
+|----------|--------|-------------------|----------------------------------------|
+| `db_path`| string | `DEFAULT_DB_PATH` | Path to SQLite database                |
+| `id`     | int    | (required)        | Document ID to update                  |
+| `content`| string | (required)        | New text content (non-empty)           |
+
+- **Returns**: `{ "updated": true, "id": 42 }` (updated is false if ID not found)
+
+#### `list_sources`
+
+List all indexed sources with chunk counts and ID ranges.
+
+- **Params**:
+
+| Param    | Type   | Default           | Description               |
+|----------|--------|-------------------|---------------------------|
+| `db_path`| string | `DEFAULT_DB_PATH` | Path to SQLite database   |
+
+- **Returns**:
+
+```json
+{
+    "sources": [
+        { "source": "docs/guide.md", "chunks": 12, "min_id": 1, "max_id": 12 },
+        { "source": "docs/api.md", "chunks": 8, "min_id": 13, "max_id": 20 }
+    ],
+    "count": 2
+}
+```
 
 #### `shutdown`
 
