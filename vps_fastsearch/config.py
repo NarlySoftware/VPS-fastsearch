@@ -106,11 +106,16 @@ class FastSearchConfig:
                 if not isinstance(idle_timeout, (int, float)) or idle_timeout < 0:
                     logger.warning(f"Invalid idle_timeout_seconds: {idle_timeout!r}, using default 300")
                     idle_timeout = 300
+                idle_timeout = int(idle_timeout)
+                threads = model_data.get("threads", 2)
+                if not isinstance(threads, int) or threads < 1:
+                    logger.warning(f"Invalid threads: {threads!r}, using default 2")
+                    threads = 2
                 models[name] = ModelConfig(
                     name=model_data.get("name", ""),
                     keep_loaded=keep_loaded,
                     idle_timeout_seconds=idle_timeout,
-                    threads=model_data.get("threads", 2),
+                    threads=threads,
                 )
 
         memory_data = data.get("memory", {})

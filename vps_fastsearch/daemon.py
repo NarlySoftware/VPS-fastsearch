@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+import orjson
 import psutil
 
 from .config import DEFAULT_DB_PATH, FastSearchConfig, load_config, ModelConfig
@@ -394,8 +395,8 @@ class FastSearchDaemon:
                 oldest_key = next(iter(self._db_cache))
                 try:
                     self._db_cache[oldest_key].close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Error closing evicted DB {oldest_key}: {e}")
                 del self._db_cache[oldest_key]
             self._db_cache[key] = SearchDB(str(resolved))
         return self._db_cache[key]
@@ -560,11 +561,23 @@ class FastSearchDaemon:
     async def _handle_reload_config(self, params: dict) -> dict:
         """Reload configuration."""
         config_path = params.get("config_path")
-        
+
+        if config_path is not None:
+            resolved = Path(config_path).resolve()
+            if resolved.suffix not in (".yaml", ".yml"):
+                raise ValueError(
+                    f"Config path must end with .yaml or .yml: {config_path}"
+                )
+            if not resolved.is_file():
+                raise ValueError(
+                    f"Config file does not exist: {resolved}"
+                )
+            config_path = str(resolved)
+
         new_config = load_config(config_path)
         self.config = new_config
         self.model_manager.config = new_config
-        
+
         return {
             "reloaded": True,
             "socket_path": new_config.daemon.socket_path,
@@ -580,12 +593,19 @@ class FastSearchDaemon:
         try:
             request = json.loads(data.decode())
         except json.JSONDecodeError as e:
-            return json.dumps({
+            return orjson.dumps({
                 "jsonrpc": "2.0",
                 "error": {"code": -32700, "message": f"Parse error: {e}"},
                 "id": None,
-            }).encode()
-        
+            })
+
+        if not isinstance(request, dict):
+            return orjson.dumps({
+                "jsonrpc": "2.0",
+                "error": {"code": -32600, "message": "Invalid Request: expected JSON object"},
+                "id": None,
+            })
+
         request_id = request.get("id")
         method = request.get("method")
         params = request.get("params", {})
@@ -593,34 +613,34 @@ class FastSearchDaemon:
         self._request_count += 1
         
         if method not in self._handlers:
-            return json.dumps({
+            return orjson.dumps({
                 "jsonrpc": "2.0",
                 "error": {"code": -32601, "message": f"Method not found: {method}"},
                 "id": request_id,
-            }).encode()
+            })
         
         try:
             result = await self._handlers[method](params)
-            return json.dumps({
+            return orjson.dumps({
                 "jsonrpc": "2.0",
                 "result": result,
                 "id": request_id,
-            }).encode()
+            })
         except ValueError as e:
-            return json.dumps({
+            return orjson.dumps({
                 "jsonrpc": "2.0",
                 "error": {"code": -32602, "message": str(e)},
                 "id": request_id,
-            }).encode()
+            })
         except Exception as e:
             logger.exception(f"Error handling {method}")
             # Return generic message to client; details are in the daemon log
             error_type = type(e).__name__
-            return json.dumps({
+            return orjson.dumps({
                 "jsonrpc": "2.0",
                 "error": {"code": -32000, "message": f"Internal error: {error_type}"},
                 "id": request_id,
-            }).encode()
+            })
     
     async def _handle_client(
         self,
@@ -669,15 +689,19 @@ class FastSearchDaemon:
         pid_path = self.config.daemon.pid_path
         try:
             pid = int(Path(pid_path).read_text().strip())
-            os.kill(pid, 0)  # Check if process is alive
-            # Verify the process is actually a fastsearch daemon (PID reuse guard)
-            is_fastsearch = False
+            # Cross-platform PID reuse guard
             try:
-                cmdline = Path(f"/proc/{pid}/cmdline").read_text()
-                is_fastsearch = "fastsearch" in cmdline
-            except (FileNotFoundError, PermissionError):
-                # /proc not available (e.g. macOS) or no permission — assume running
-                is_fastsearch = True
+                os.kill(pid, 0)  # Check if process exists (signal 0 = no signal sent)
+                is_fastsearch = True  # Process exists; assume it's fastsearch
+                try:
+                    cmdline = Path(f"/proc/{pid}/cmdline").read_text()
+                    is_fastsearch = "fastsearch" in cmdline
+                except (FileNotFoundError, PermissionError):
+                    pass  # /proc not available (macOS), keep assumption
+            except ProcessLookupError:
+                is_fastsearch = False  # Process doesn't exist, stale PID
+            except PermissionError:
+                is_fastsearch = True  # Process exists but we can't signal it
             if is_fastsearch:
                 raise RuntimeError(
                     f"Daemon already running (PID {pid}). "
@@ -689,8 +713,6 @@ class FastSearchDaemon:
             )
         except (FileNotFoundError, ValueError):
             pass  # No PID file or invalid content
-        except ProcessLookupError:
-            pass  # Stale PID file, process is dead — proceed
 
         # Warn if XDG_RUNTIME_DIR is not set
         if not os.environ.get("XDG_RUNTIME_DIR"):
@@ -775,12 +797,12 @@ class FastSearchDaemon:
 def run_daemon(config_path: str | None = None, foreground: bool = True, detach: bool = False):
     """Run the VPS-FastSearch daemon."""
     # Set up logging
+    config = load_config(config_path)
+
     logging.basicConfig(
-        level=logging.INFO,
+        level=getattr(logging, config.daemon.log_level.upper(), logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    
-    config = load_config(config_path)
     
     if detach:
         # Fork to background

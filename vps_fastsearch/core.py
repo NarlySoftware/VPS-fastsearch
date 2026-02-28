@@ -32,16 +32,18 @@ class Embedder:
 
         self.model_name = model_name or self.MODEL_NAME
         logger.info(f"Loading embedding model {self.model_name} (first run may download ~130MB)")
-        try:
-            self._model = TextEmbedding(self.model_name, threads=2)
-        except Exception as e:
-            if "connection" in str(e).lower() or "timeout" in str(e).lower():
-                logger.warning(f"Model download failed, retrying: {e}")
-                import time
-                time.sleep(3)
+        for attempt in range(3):
+            try:
                 self._model = TextEmbedding(self.model_name, threads=2)
-            else:
-                raise
+                break
+            except Exception as e:
+                if attempt < 2 and ("connection" in str(e).lower() or "timeout" in str(e).lower()):
+                    wait = 3 * (2 ** attempt)  # 3, 6, 12 seconds
+                    logger.warning(f"Model download attempt {attempt + 1}/3 failed, retrying in {wait}s: {e}")
+                    import time
+                    time.sleep(wait)
+                else:
+                    raise
     
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a list of texts."""
@@ -84,16 +86,18 @@ class Reranker:
 
         self.model_name = model_name or self.MODEL_NAME
         logger.info(f"Loading reranker model {self.model_name} (first run may download ~80MB)")
-        try:
-            self._model = CrossEncoder(self.model_name)
-        except Exception as e:
-            if "connection" in str(e).lower() or "timeout" in str(e).lower():
-                logger.warning(f"Model download failed, retrying: {e}")
-                import time
-                time.sleep(3)
+        for attempt in range(3):
+            try:
                 self._model = CrossEncoder(self.model_name)
-            else:
-                raise
+                break
+            except Exception as e:
+                if attempt < 2 and ("connection" in str(e).lower() or "timeout" in str(e).lower()):
+                    wait = 3 * (2 ** attempt)  # 3, 6, 12 seconds
+                    logger.warning(f"Model download attempt {attempt + 1}/3 failed, retrying in {wait}s: {e}")
+                    import time
+                    time.sleep(wait)
+                else:
+                    raise
     
     def rerank(self, query: str, documents: list[str]) -> list[float]:
         """
@@ -177,6 +181,9 @@ class SearchDB:
             logger.warning(f"WAL mode not available (got {result[0][0]}). Performance may be degraded on network/FUSE filesystems.")
         # Wait up to 5 seconds if database is locked
         self._execute("PRAGMA busy_timeout=5000")
+        self._execute("PRAGMA cache_size = -4000")  # 4MB cache
+        self._execute("PRAGMA mmap_size = 268435456")  # 256MB mmap
+        self._execute("PRAGMA wal_autocheckpoint = 1000")  # Checkpoint every 1000 pages
 
         # Lightweight corruption check
         try:

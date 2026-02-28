@@ -202,9 +202,9 @@ def index(ctx, path, glob, reindex):
         if client.ping():
             use_daemon = True
             click.echo("Using daemon for embedding...")
-    except Exception:
+    except (OSError, ConnectionError, TimeoutError):
         pass
-    
+
     if not use_daemon:
         click.echo("Loading embedding model...", nl=False)
         t0 = time.perf_counter()
@@ -303,9 +303,9 @@ def search(ctx, query, limit, mode, rerank, no_daemon, output_json):
             client = FastSearchClient(config_path=config_path, timeout=30.0)
             if client.ping():
                 use_daemon = True
-        except Exception:
+        except (OSError, ConnectionError, TimeoutError):
             pass
-    
+
     t0 = time.perf_counter()
     
     if use_daemon:
@@ -322,7 +322,12 @@ def search(ctx, query, limit, mode, rerank, no_daemon, output_json):
     else:
         # Direct search
         if not Path(db_path).exists():
-            click.echo("Database not found. Run 'vps-fastsearch index <path>' first.", err=True)
+            click.echo(
+                f"Database not found at {db_path}. "
+                "Run 'vps-fastsearch index <path>' to create it, "
+                "or start the daemon with 'vps-fastsearch daemon start'.",
+                err=True,
+            )
             sys.exit(1)
         db = SearchDB(db_path)
         

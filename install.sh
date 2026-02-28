@@ -80,7 +80,7 @@ if spec and spec.origin:
         echo "  Detected 32-bit vec0.so on ARM64 — rebuilding from source..."
         BUILD_DIR="/tmp/sqlite-vec-build"
         rm -rf "$BUILD_DIR"
-        git clone --depth 1 https://github.com/asg017/sqlite-vec.git "$BUILD_DIR"
+        git clone --depth 1 --branch v0.1.6 https://github.com/asg017/sqlite-vec.git "$BUILD_DIR"
         (cd "$BUILD_DIR" && make loadable)
         cp "$BUILD_DIR/dist/vec0.so" "$VEC_SO"
         rm -rf "$BUILD_DIR"
