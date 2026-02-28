@@ -393,11 +393,16 @@ class FastSearchDaemon:
             # Evict oldest entry if cache is full
             if len(self._db_cache) >= self._DB_CACHE_MAX:
                 oldest_key = next(iter(self._db_cache))
+                evicted_db = self._db_cache.pop(oldest_key)
                 try:
-                    self._db_cache[oldest_key].close()
+                    evicted_db.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                    logger.debug(f"WAL checkpoint completed for evicted DB {oldest_key}")
+                except Exception as e:
+                    logger.warning(f"WAL checkpoint failed for evicted DB {oldest_key}: {e}")
+                try:
+                    evicted_db.close()
                 except Exception as e:
                     logger.warning(f"Error closing evicted DB {oldest_key}: {e}")
-                del self._db_cache[oldest_key]
             self._db_cache[key] = SearchDB(str(resolved))
         return self._db_cache[key]
 
@@ -777,9 +782,17 @@ class FastSearchDaemon:
         
         await self.model_manager.shutdown()
 
-        # Close cached database connections
-        for db in self._db_cache.values():
-            db.close()
+        # Checkpoint and close cached database connections
+        for db_key, db in self._db_cache.items():
+            try:
+                db.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                logger.debug(f"WAL checkpoint completed for DB {db_key}")
+            except Exception as e:
+                logger.warning(f"WAL checkpoint failed for DB {db_key}: {e}")
+            try:
+                db.close()
+            except Exception as e:
+                logger.warning(f"Error closing DB {db_key}: {e}")
         self._db_cache.clear()
 
         # Clean up socket and PID files
@@ -805,22 +818,75 @@ def run_daemon(config_path: str | None = None, foreground: bool = True, detach: 
     )
     
     if detach:
-        # Fork to background
-        pid = os.fork()
+        # Double-fork daemonization (Unix standard technique).
+        # A pipe communicates the final daemon PID back to the original parent.
+        read_fd, write_fd = os.pipe()
+
+        # --- First fork: detach from parent ---
+        try:
+            pid = os.fork()
+        except OSError as e:
+            os.close(read_fd)
+            os.close(write_fd)
+            print(f"First fork failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
         if pid > 0:
-            # Parent - exit
-            print(f"VPS-FastSearch daemon started (PID: {pid})")
-            sys.exit(0)
-        
-        # Child - create new session
+            # Original parent: read the grandchild PID from the pipe, then exit.
+            os.close(write_fd)
+            try:
+                data = b""
+                while True:
+                    chunk = os.read(read_fd, 64)
+                    if not chunk:
+                        break
+                    data += chunk
+                grandchild_pid = int(data.decode().strip())
+                print(f"VPS-FastSearch daemon started (PID: {grandchild_pid})")
+            except (ValueError, OSError):
+                print("VPS-FastSearch daemon started (PID unknown)")
+            finally:
+                os.close(read_fd)
+            os._exit(0)
+
+        # --- First child: create new session ---
+        os.close(read_fd)
         os.setsid()
-        
-        # Redirect stdio
+
+        # --- Second fork: prevent reacquiring a controlling terminal ---
+        try:
+            pid2 = os.fork()
+        except OSError as e:
+            os.close(write_fd)
+            print(f"Second fork failed: {e}", file=sys.stderr)
+            os._exit(1)
+
+        if pid2 > 0:
+            # First child exits; grandchild continues as the daemon.
+            os.close(write_fd)
+            os._exit(0)
+
+        # --- Grandchild (final daemon process) ---
+        # Send our PID back to the original parent via the pipe.
+        try:
+            os.write(write_fd, str(os.getpid()).encode())
+        except OSError:
+            pass
+        os.close(write_fd)
+
+        # Change working directory to / so we don't hold any mountpoint busy
+        os.chdir("/")
+
+        # Reset file creation mask
+        os.umask(0o022)
+
+        # Redirect stdin/stdout/stderr to /dev/null
         devnull = os.open(os.devnull, os.O_RDWR)
         os.dup2(devnull, 0)
         os.dup2(devnull, 1)
         os.dup2(devnull, 2)
-        os.close(devnull)
+        if devnull > 2:
+            os.close(devnull)
     
     daemon = FastSearchDaemon(config)
     

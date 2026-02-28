@@ -3,10 +3,14 @@
 import logging
 import os
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Schema version for migration tracking (via PRAGMA user_version)
+SCHEMA_VERSION = 1
 
 import apsw
 import orjson
@@ -20,13 +24,29 @@ _reranker_instance = None
 class Embedder:
     """
     Embedding generator using FastEmbed with ONNX Runtime.
-    
+
     Uses bge-base-en-v1.5 (768 dimensions) for fast CPU inference.
     """
-    
+
     MODEL_NAME = "BAAI/bge-base-en-v1.5"
     DIMENSIONS = 768
-    
+
+    _instance: "Embedder | None" = None
+    _lock: threading.Lock = threading.Lock()
+
+    @classmethod
+    def get_instance(cls, model_name: str | None = None) -> "Embedder":
+        """Get or create a thread-safe singleton Embedder instance.
+
+        Uses double-checked locking to avoid acquiring the lock on every call.
+        Direct instantiation via ``Embedder()`` still works normally.
+        """
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls(model_name)
+        return cls._instance
+
     def __init__(self, model_name: str | None = None):
         from fastembed import TextEmbedding
 
@@ -57,24 +77,37 @@ class Embedder:
 
 
 def get_embedder() -> Embedder:
-    """Get or create singleton embedder instance."""
-    global _embedder_instance
-    if _embedder_instance is None:
-        _embedder_instance = Embedder()
-    return _embedder_instance
+    """Get or create singleton embedder instance (thread-safe)."""
+    return Embedder.get_instance()
 
 
 class Reranker:
     """
     Cross-encoder reranker using sentence-transformers.
-    
+
     Uses ms-marco-MiniLM-L-6-v2 for fast CPU inference.
     Cross-encoders are more accurate than bi-encoders for reranking
     but slower (O(n) forward passes vs O(1) for embedding comparison).
     """
-    
+
     MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    
+
+    _instance: "Reranker | None" = None
+    _lock: threading.Lock = threading.Lock()
+
+    @classmethod
+    def get_instance(cls, model_name: str | None = None) -> "Reranker":
+        """Get or create a thread-safe singleton Reranker instance.
+
+        Uses double-checked locking to avoid acquiring the lock on every call.
+        Direct instantiation via ``Reranker()`` still works normally.
+        """
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls(model_name)
+        return cls._instance
+
     def __init__(self, model_name: str | None = None):
         try:
             from sentence_transformers import CrossEncoder
@@ -142,11 +175,8 @@ class Reranker:
 
 
 def get_reranker() -> Reranker:
-    """Get or create singleton reranker instance."""
-    global _reranker_instance
-    if _reranker_instance is None:
-        _reranker_instance = Reranker()
-    return _reranker_instance
+    """Get or create singleton reranker instance (thread-safe)."""
+    return Reranker.get_instance()
 
 
 class SearchDB:
@@ -256,6 +286,29 @@ class SearchDB:
                 embedding float32[768]
             )
         """)
+
+        self._check_schema_version()
+
+    def _check_schema_version(self) -> None:
+        """Check and update database schema version using PRAGMA user_version."""
+        row = list(self._execute("PRAGMA user_version"))
+        current_version = row[0][0]
+
+        if current_version > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"Database schema version {current_version} is newer than "
+                f"supported version {SCHEMA_VERSION}. "
+                f"Please upgrade vps-fastsearch."
+            )
+
+        if current_version < SCHEMA_VERSION:
+            # For now, no migrations needed — legacy DBs (version 0) are compatible
+            # with version 1. Future migrations would go here as:
+            #   if current_version < 2: _migrate_v1_to_v2()
+            logger.info(
+                f"Updating database schema version from {current_version} to {SCHEMA_VERSION}"
+            )
+            self._execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     
     def index_document(
         self,

@@ -8,7 +8,7 @@ import click
 import orjson
 
 from .chunker import chunk_markdown, chunk_text
-from .core import SearchDB, get_embedder
+from .core import Embedder, SearchDB
 from .config import load_config, create_default_config, DEFAULT_CONFIG_PATH, DEFAULT_DB_PATH
 from .client import FastSearchClient, DaemonNotRunningError
 from . import __version__
@@ -208,7 +208,7 @@ def index(ctx, path, glob, reindex):
     if not use_daemon:
         click.echo("Loading embedding model...", nl=False)
         t0 = time.perf_counter()
-        embedder = get_embedder()
+        embedder = Embedder.get_instance()
         model_time = time.perf_counter() - t0
         click.echo(f" done ({model_time:.2f}s)")
     
@@ -334,11 +334,11 @@ def search(ctx, query, limit, mode, rerank, no_daemon, output_json):
         if mode == "bm25":
             results = db.search_bm25(query, limit=limit)
         elif mode == "vector":
-            embedder = get_embedder()
+            embedder = Embedder.get_instance()
             embedding = embedder.embed_single(query)
             results = db.search_vector(embedding, limit=limit)
         else:  # hybrid
-            embedder = get_embedder()
+            embedder = Embedder.get_instance()
             embedding = embedder.embed_single(query)
             
             if rerank:
