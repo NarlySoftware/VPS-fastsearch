@@ -26,7 +26,16 @@ echo "  Python 3.13 ready: $(python3.13 --version)"
 echo "[2/8] Setting up virtual environment..."
 
 if [ -d "$VENV_DIR" ]; then
-    echo "  Venv already exists at $VENV_DIR"
+    # Verify the existing venv uses Python 3.13; rebuild if mismatched
+    if "$VENV_DIR/bin/python" --version 2>/dev/null | grep -q "3.13"; then
+        echo "  Venv already exists at $VENV_DIR (Python 3.13 confirmed)"
+    else
+        OLD_PY=$("$VENV_DIR/bin/python" --version 2>/dev/null || echo "unknown")
+        echo "  Venv Python version mismatch ($OLD_PY), recreating with 3.13..."
+        rm -rf "$VENV_DIR"
+        python3.13 -m venv "$VENV_DIR"
+        echo "  Recreated venv at $VENV_DIR"
+    fi
 else
     python3.13 -m venv "$VENV_DIR"
     echo "  Created venv at $VENV_DIR"
@@ -38,16 +47,58 @@ fi
 # ---- Step 3: Install VPS-FastSearch ----
 echo "[3/8] Installing VPS-FastSearch..."
 
-"$VENV_DIR/bin/pip" install --timeout 120 "$INSTALL_DIR[all]" --quiet
+"$VENV_DIR/bin/pip" install --timeout 300 --retries 10 "$INSTALL_DIR[all]" --quiet
 echo "  Installed vps-fastsearch with all extras"
 
 # ---- Step 4: Verify native extensions ----
 echo "[4/8] Verifying native extensions..."
 
-if "$VENV_DIR/bin/python" -c "import sqlite_vec; import apsw; import onnxruntime; print('Native extensions OK')"; then
-    echo "  Native extensions loaded successfully"
-else
-    echo "  ERROR: One or more native extensions failed to load"
+NATIVE_OK=true
+if ! "$VENV_DIR/bin/python" -c "import apsw; import onnxruntime; print('  apsw + onnxruntime OK')" 2>/dev/null; then
+    echo "  ERROR: apsw or onnxruntime failed to load"
+    exit 1
+fi
+if ! "$VENV_DIR/bin/python" -c "import sqlite_vec; print('  sqlite_vec OK')" 2>/dev/null; then
+    echo "  WARNING: sqlite_vec failed to load (may be fixed in step 4b)"
+    NATIVE_OK=false
+fi
+
+# ---- Step 4b: Fix sqlite-vec ELFCLASS32 on ARM64 (upstream bug #211) ----
+# See: https://github.com/asg017/sqlite-vec/issues/211
+ARCH=$(uname -m)
+if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
+    # Locate vec0.so even if import fails — find it via pip package location
+    VEC_PKG_DIR=$("$VENV_DIR/bin/python" -c "
+import importlib.util, pathlib
+spec = importlib.util.find_spec('sqlite_vec')
+if spec and spec.origin:
+    print(pathlib.Path(spec.origin).parent)
+" 2>/dev/null || true)
+    VEC_SO="${VEC_PKG_DIR:+$VEC_PKG_DIR/vec0.so}"
+
+    if [ -n "$VEC_SO" ] && [ -f "$VEC_SO" ] && file "$VEC_SO" | grep -q "ELF 32-bit"; then
+        echo "  Detected 32-bit vec0.so on ARM64 — rebuilding from source..."
+        BUILD_DIR="/tmp/sqlite-vec-build"
+        rm -rf "$BUILD_DIR"
+        git clone --depth 1 https://github.com/asg017/sqlite-vec.git "$BUILD_DIR"
+        (cd "$BUILD_DIR" && make loadable)
+        cp "$BUILD_DIR/dist/vec0.so" "$VEC_SO"
+        rm -rf "$BUILD_DIR"
+        echo "  Replaced vec0.so with native ARM64 build"
+        # Re-verify after rebuild
+        if "$VENV_DIR/bin/python" -c "import sqlite_vec" 2>/dev/null; then
+            echo "  sqlite-vec now loads correctly"
+            NATIVE_OK=true
+        else
+            echo "  ERROR: sqlite-vec still fails to load after rebuild"
+        fi
+    elif [ "$NATIVE_OK" = true ]; then
+        echo "  sqlite-vec vec0.so is native ARM64, no fix needed"
+    fi
+fi
+
+if [ "$NATIVE_OK" != true ]; then
+    echo "  ERROR: Native extensions verification failed"
     exit 1
 fi
 
@@ -131,7 +182,7 @@ echo ""
 # Add ~/.local/bin to PATH if not already there
 if [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; then
     SHELL_RC="$HOME/.bashrc"
-    if [ -n "$ZSH_VERSION" ] || [[ "$SHELL" == */zsh ]]; then
+    if [ -n "${ZSH_VERSION:-}" ] || [[ "$SHELL" == */zsh ]]; then
         SHELL_RC="$HOME/.zshrc"
     fi
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
