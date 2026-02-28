@@ -93,10 +93,27 @@ def _split_long_paragraph(
 ) -> Iterator[str]:
     """Split a long paragraph by sentences."""
     # Split by sentence boundaries
+    # Use individual fixed-width lookbehinds (Python 3.13+ requires fixed-width)
     sentences = re.split(
         r"(?<=[.!?])"  # After sentence-ending punctuation
-        r"(?<!\b[A-Z]\.)"  # Not after single capital letter (initials like "J.")
-        r"(?<!\b(?:Dr|Mr|Ms|Mrs|Prof|Sr|Jr|vs|etc|Inc|Ltd|St|Ave|Rd|Vol|No|Fig|approx)\.)"
+        r"(?<![A-Z]\.)"  # Not after single capital letter (initials like "J.")
+        r"(?<!Dr\.)"
+        r"(?<!Mr\.)"
+        r"(?<!Ms\.)"
+        r"(?<!Mrs\.)"
+        r"(?<!Prof\.)"
+        r"(?<!Sr\.)"
+        r"(?<!Jr\.)"
+        r"(?<!vs\.)"
+        r"(?<!etc\.)"
+        r"(?<!Inc\.)"
+        r"(?<!Ltd\.)"
+        r"(?<!St\.)"
+        r"(?<!Ave\.)"
+        r"(?<!Rd\.)"
+        r"(?<!Vol\.)"
+        r"(?<!No\.)"
+        r"(?<!Fig\.)"
         r"\s+",
         text,
     )

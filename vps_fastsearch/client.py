@@ -199,6 +199,7 @@ class FastSearchClient:
         limit: int = 10,
         mode: str = "hybrid",
         rerank: bool = False,
+        metadata_filter: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Search indexed documents.
@@ -209,6 +210,9 @@ class FastSearchClient:
             limit: Maximum results to return
             mode: Search mode (hybrid, bm25, vector)
             rerank: Apply cross-encoder reranking
+            metadata_filter: Optional dict of key-value pairs for exact match
+                on top-level metadata keys (AND logic). Example:
+                ``{"author": "alice", "category": "tech"}``
 
         Returns:
             dict with:
@@ -220,16 +224,16 @@ class FastSearchClient:
         """
         if db_path is None:
             db_path = os.environ.get("FASTSEARCH_DB", DEFAULT_DB_PATH)
-        return self._send_request(
-            "search",
-            {
-                "query": query,
-                "db_path": db_path,
-                "limit": limit,
-                "mode": mode,
-                "rerank": rerank,
-            },
-        )
+        params: dict[str, Any] = {
+            "query": query,
+            "db_path": db_path,
+            "limit": limit,
+            "mode": mode,
+            "rerank": rerank,
+        }
+        if metadata_filter:
+            params["metadata_filter"] = metadata_filter
+        return self._send_request("search", params)
 
     def embed(self, texts: list[str]) -> dict[str, Any]:
         """
@@ -291,6 +295,102 @@ class FastSearchClient:
             dict with slot, unloaded status
         """
         return self._send_request("unload_model", {"slot": slot})
+
+    def batch_index(
+        self,
+        db_path: str,
+        documents: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """
+        Batch index documents into the database.
+
+        Args:
+            db_path: Path to database file
+            documents: List of document dicts, each with keys:
+                - source (str): Document source identifier
+                - chunk_index (int): Chunk position within the source
+                - content (str): Document text content
+                - embedding (list[float]): 768-dim embedding vector
+                - metadata (dict|None): Optional metadata
+
+        Returns:
+            dict with:
+            - indexed: Count of documents indexed
+            - doc_ids: List of assigned document IDs
+            - index_time_ms: Indexing latency
+        """
+        return self._send_request(
+            "batch_index",
+            {
+                "db_path": db_path,
+                "documents": documents,
+            },
+        )
+
+    def delete(
+        self,
+        source: str | None = None,
+        doc_id: int | None = None,
+        db_path: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Delete documents by source name or by document ID.
+
+        Args:
+            source: Source name to delete all chunks for
+            doc_id: Single document ID to delete
+            db_path: Optional database path
+
+        Returns:
+            dict with deleted count and source/id
+        """
+        params: dict[str, Any] = {}
+        if source is not None:
+            params["source"] = source
+        if doc_id is not None:
+            params["id"] = doc_id
+        if db_path is not None:
+            params["db_path"] = db_path
+        return self._send_request("delete", params)
+
+    def update_content(
+        self,
+        doc_id: int,
+        content: str,
+        db_path: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Update content and embedding for a document by ID.
+
+        The daemon re-embeds the new content automatically.
+
+        Args:
+            doc_id: Document ID to update
+            content: New content text
+            db_path: Optional database path
+
+        Returns:
+            dict with updated status and id
+        """
+        params: dict[str, Any] = {"id": doc_id, "content": content}
+        if db_path is not None:
+            params["db_path"] = db_path
+        return self._send_request("update_content", params)
+
+    def list_sources(self, db_path: str | None = None) -> dict[str, Any]:
+        """
+        List all indexed sources with chunk counts.
+
+        Args:
+            db_path: Optional database path
+
+        Returns:
+            dict with sources list and count
+        """
+        params: dict[str, Any] = {}
+        if db_path is not None:
+            params["db_path"] = db_path
+        return self._send_request("list_sources", params)
 
     def reload_config(self, config_path: str | None = None) -> dict[str, Any]:
         """
@@ -361,17 +461,22 @@ def search(query: str, **kwargs: Any) -> list[dict[str, Any]]:
         mode = kwargs.get("mode", "hybrid")
         rerank = kwargs.get("rerank", False)
 
+        metadata_filter = kwargs.get("metadata_filter")
         db = SearchDB(db_path)
         try:
             if mode == "bm25":
-                results = db.search_bm25(query, limit=limit)
+                results = db.search_bm25(query, limit=limit, metadata_filter=metadata_filter)
             else:
                 embedder = get_embedder()
                 embedding = embedder.embed_single(query)
                 if rerank:
-                    results = db.search_hybrid_reranked(query, embedding, limit=limit)
+                    results = db.search_hybrid_reranked(
+                        query, embedding, limit=limit, metadata_filter=metadata_filter
+                    )
                 else:
-                    results = db.search_hybrid(query, embedding, limit=limit)
+                    results = db.search_hybrid(
+                        query, embedding, limit=limit, metadata_filter=metadata_filter
+                    )
         finally:
             db.close()
 

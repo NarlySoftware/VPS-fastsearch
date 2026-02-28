@@ -10,6 +10,7 @@ import os
 import signal
 import socket
 import sys
+import threading
 import time
 from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
@@ -366,7 +367,7 @@ class FastSearchDaemon:
         self._start_time: float | None = None
         self._request_count = 0
         self._shutdown_event = asyncio.Event()
-        self._db_cache: dict[str, SearchDB] = {}
+        self._db_cache: dict[str, tuple[SearchDB, threading.Lock]] = {}
         self._concurrent_sem = asyncio.Semaphore(64)
 
         # Handler registry
@@ -379,6 +380,10 @@ class FastSearchDaemon:
             "load_model": self._handle_load_model,
             "unload_model": self._handle_unload_model,
             "reload_config": self._handle_reload_config,
+            "batch_index": self._handle_batch_index,
+            "delete": self._handle_delete,
+            "update_content": self._handle_update_content,
+            "list_sources": self._handle_list_sources,
             "shutdown": self._handle_shutdown,
         }
 
@@ -400,12 +405,17 @@ class FastSearchDaemon:
 
     _DB_CACHE_MAX: int = 8
 
-    def _get_db(self, db_path: str) -> SearchDB:
-        """Get or create a cached SearchDB connection.
+    def _get_db(self, db_path: str) -> tuple[SearchDB, threading.Lock]:
+        """Get or create a cached SearchDB connection with its associated lock.
 
         Validates that db_path resolves to a location under the allowed base
         directory (parent of DEFAULT_DB_PATH) to prevent path traversal attacks.
         Caps the connection cache at _DB_CACHE_MAX entries.
+
+        Returns a (SearchDB, threading.Lock) tuple. The lock MUST be held when
+        performing any operation on the SearchDB from an executor thread to
+        prevent concurrent threads from interleaving transactions on the same
+        apsw.Connection.
         """
         allowed_base = Path(DEFAULT_DB_PATH).resolve().parent
         resolved = Path(db_path).resolve()
@@ -418,7 +428,7 @@ class FastSearchDaemon:
             # Evict oldest entry if cache is full
             if len(self._db_cache) >= self._DB_CACHE_MAX:
                 oldest_key = next(iter(self._db_cache))
-                evicted_db = self._db_cache.pop(oldest_key)
+                evicted_db, _evicted_lock = self._db_cache.pop(oldest_key)
                 try:
                     evicted_db.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                     logger.debug(f"WAL checkpoint completed for evicted DB {oldest_key}")
@@ -428,7 +438,7 @@ class FastSearchDaemon:
                     evicted_db.close()
                 except Exception as e:
                     logger.warning(f"Error closing evicted DB {oldest_key}: {e}")
-            self._db_cache[key] = SearchDB(str(resolved))
+            self._db_cache[key] = (SearchDB(str(resolved)), threading.Lock())
         return self._db_cache[key]
 
     async def _handle_search(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -447,21 +457,39 @@ class FastSearchDaemon:
         if mode not in ("bm25", "vector", "hybrid"):
             raise ValueError(f"Invalid mode: {mode!r}, must be 'bm25', 'vector', or 'hybrid'")
         rerank = params.get("rerank", False)
+        metadata_filter = params.get("metadata_filter")
+        if metadata_filter is not None and not isinstance(metadata_filter, dict):
+            raise ValueError("metadata_filter must be a JSON object (dict)")
 
         # Get or load embedder
         embedder_model = await self.model_manager.load_model("embedder")
         reranker_model = None
 
-        db = self._get_db(db_path)
+        db, db_lock = self._get_db(db_path)
 
         try:
             start_time = time.perf_counter()
+            loop = asyncio.get_running_loop()
 
             if mode == "bm25":
-                results = db.search_bm25(query, limit=limit)
+
+                def _search_bm25() -> list[dict[str, Any]]:
+                    with db_lock:
+                        return db.search_bm25(
+                            query, limit=limit, metadata_filter=metadata_filter
+                        )
+
+                results = await loop.run_in_executor(None, _search_bm25)
             elif mode == "vector":
                 embedding = list(embedder_model.instance.embed([query]))[0].tolist()
-                results = db.search_vector(embedding, limit=limit)
+
+                def _search_vector() -> list[dict[str, Any]]:
+                    with db_lock:
+                        return db.search_vector(
+                            embedding, limit=limit, metadata_filter=metadata_filter
+                        )
+
+                results = await loop.run_in_executor(None, _search_vector)
             else:  # hybrid
                 embedding = list(embedder_model.instance.embed([query]))[0].tolist()
 
@@ -469,15 +497,30 @@ class FastSearchDaemon:
                     # Load reranker on-demand
                     reranker_model = await self.model_manager.load_model("reranker")
 
-                    results = db.search_hybrid_reranked(
-                        query,
-                        embedding,
-                        limit=limit,
-                        rerank_top_k=min(limit * 3, 30),
-                        reranker=_RerankerAdapter(reranker_model.instance),
-                    )
+                    def _search_hybrid_reranked() -> list[dict[str, Any]]:
+                        with db_lock:
+                            return db.search_hybrid_reranked(
+                                query,
+                                embedding,
+                                limit=limit,
+                                rerank_top_k=min(limit * 3, 30),
+                                reranker=_RerankerAdapter(reranker_model.instance),
+                                metadata_filter=metadata_filter,
+                            )
+
+                    results = await loop.run_in_executor(None, _search_hybrid_reranked)
                 else:
-                    results = db.search_hybrid(query, embedding, limit=limit)
+
+                    def _search_hybrid() -> list[dict[str, Any]]:
+                        with db_lock:
+                            return db.search_hybrid(
+                                query,
+                                embedding,
+                                limit=limit,
+                                metadata_filter=metadata_filter,
+                            )
+
+                    results = await loop.run_in_executor(None, _search_hybrid)
 
             search_time = time.perf_counter() - start_time
 
@@ -603,6 +646,153 @@ class FastSearchDaemon:
             "reloaded": True,
             "socket_path": new_config.daemon.socket_path,
         }
+
+    async def _handle_batch_index(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Batch index documents into the database."""
+        db_path = params.get("db_path", DEFAULT_DB_PATH)
+        documents = params.get("documents")
+
+        if not isinstance(documents, list):
+            raise ValueError("Missing or invalid 'documents' parameter (must be a list)")
+
+        MAX_BATCH_SIZE = 1000
+        if len(documents) > MAX_BATCH_SIZE:
+            raise ValueError(f"Too many documents: {len(documents)} (max {MAX_BATCH_SIZE})")
+
+        # Validate each document has required fields
+        required_fields = {"source", "chunk_index", "content", "embedding"}
+        for i, doc in enumerate(documents):
+            if not isinstance(doc, dict):
+                raise ValueError(f"Document at index {i} must be an object")
+            missing = required_fields - doc.keys()
+            if missing:
+                raise ValueError(
+                    f"Document at index {i} missing required fields: {sorted(missing)}"
+                )
+            if not isinstance(doc["source"], str) or not doc["source"]:
+                raise ValueError(f"Document at index {i}: 'source' must be a non-empty string")
+            if not isinstance(doc["chunk_index"], int):
+                raise ValueError(f"Document at index {i}: 'chunk_index' must be an integer")
+            if not isinstance(doc["content"], str):
+                raise ValueError(f"Document at index {i}: 'content' must be a string")
+            if not isinstance(doc["embedding"], list):
+                raise ValueError(f"Document at index {i}: 'embedding' must be a list of floats")
+
+        db, db_lock = self._get_db(db_path)
+
+        start_time = time.perf_counter()
+
+        # Build items tuple list for SearchDB.index_batch
+        items: list[tuple[str, int, str, list[float], dict[str, Any] | None]] = [
+            (
+                doc["source"],
+                doc["chunk_index"],
+                doc["content"],
+                doc["embedding"],
+                doc.get("metadata"),
+            )
+            for doc in documents
+        ]
+
+        # Run in executor with lock to prevent concurrent transaction interleaving
+        loop = asyncio.get_running_loop()
+
+        def _index_batch() -> list[int]:
+            with db_lock:
+                return db.index_batch(items)
+
+        doc_ids = await loop.run_in_executor(None, _index_batch)
+
+        index_time = time.perf_counter() - start_time
+
+        return {
+            "indexed": len(doc_ids),
+            "doc_ids": doc_ids,
+            "index_time_ms": round(index_time * 1000, 2),
+        }
+
+    async def _handle_delete(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Delete documents by source or by ID."""
+        db_path = params.get("db_path", DEFAULT_DB_PATH)
+        db, db_lock = self._get_db(db_path)
+
+        source = params.get("source")
+        doc_id = params.get("id")
+
+        if source is not None and doc_id is not None:
+            raise ValueError("Specify either 'source' or 'id', not both")
+        if source is None and doc_id is None:
+            raise ValueError("Missing 'source' or 'id' parameter")
+
+        loop = asyncio.get_running_loop()
+
+        if source is not None:
+            if not isinstance(source, str) or not source:
+                raise ValueError("'source' must be a non-empty string")
+
+            def _delete_source() -> int:
+                with db_lock:
+                    return db.delete_source(source)
+
+            count = await loop.run_in_executor(None, _delete_source)
+            return {"deleted": count, "source": source}
+        else:
+            if not isinstance(doc_id, int):
+                raise ValueError("'id' must be an integer")
+
+            def _delete_by_id() -> bool:
+                with db_lock:
+                    return db.delete_by_id(doc_id)
+
+            found = await loop.run_in_executor(None, _delete_by_id)
+            return {"deleted": 1 if found else 0, "id": doc_id}
+
+    async def _handle_update_content(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Update content and embedding for a document by ID."""
+        db_path = params.get("db_path", DEFAULT_DB_PATH)
+        db, db_lock = self._get_db(db_path)
+
+        doc_id = params.get("id")
+        content = params.get("content")
+
+        if doc_id is None:
+            raise ValueError("Missing 'id' parameter")
+        if not isinstance(doc_id, int):
+            raise ValueError("'id' must be an integer")
+        if not isinstance(content, str) or not content:
+            raise ValueError("Missing or invalid 'content' parameter (must be non-empty string)")
+
+        # Generate embedding for the new content
+        embedder_model = await self.model_manager.load_model("embedder")
+        try:
+            loop = asyncio.get_running_loop()
+            embeddings = await loop.run_in_executor(
+                None, lambda: list(embedder_model.instance.embed([content]))
+            )
+            embedding = embeddings[0].tolist()
+        finally:
+            await self.model_manager.release_model("embedder")
+
+        def _update_content() -> bool:
+            with db_lock:
+                return db.update_content(doc_id, content, embedding)
+
+        updated = await asyncio.get_running_loop().run_in_executor(None, _update_content)
+        return {"updated": updated, "id": doc_id}
+
+    async def _handle_list_sources(self, params: dict[str, Any]) -> dict[str, Any]:
+        """List all indexed sources with chunk counts."""
+        db_path = params.get("db_path", DEFAULT_DB_PATH)
+        db, db_lock = self._get_db(db_path)
+
+        loop = asyncio.get_running_loop()
+
+        def _list_sources() -> list[dict[str, Any]]:
+            with db_lock:
+                return db.list_sources()
+
+        sources = await loop.run_in_executor(None, _list_sources)
+        return {"sources": sources, "count": len(sources)}
 
     async def _handle_shutdown(self, params: dict[str, Any]) -> dict[str, Any]:
         """Shutdown the daemon."""
@@ -858,7 +1048,7 @@ class FastSearchDaemon:
         await self.model_manager.shutdown()
 
         # Checkpoint and close cached database connections
-        for db_key, db in self._db_cache.items():
+        for db_key, (db, _lock) in self._db_cache.items():
             try:
                 db.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                 logger.debug(f"WAL checkpoint completed for DB {db_key}")
@@ -969,7 +1159,7 @@ def run_daemon(
 
     # Register atexit handler to checkpoint/close DBs on non-SIGKILL exits
     def cleanup() -> None:
-        for db in daemon._db_cache.values():
+        for db, _lock in daemon._db_cache.values():
             try:
                 db.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                 db.close()

@@ -1,0 +1,175 @@
+# Locked dev + all dependencies for vps-fastsearch.
+# Includes production deps, reranker (sentence-transformers), and dev tools.
+#
+# To regenerate:
+#   pip-compile pyproject.toml --extra dev --extra all -o requirements-dev.txt --strip-extras
+#
+# To install:
+#   pip install -r requirements-dev.txt
+#
+apsw==3.51.2.0
+    # via vps-fastsearch (pyproject.toml)
+certifi==2026.2.25
+    # via
+    #   httpcore
+    #   httpx
+    #   requests
+charset-normalizer==3.4.4
+    # via requests
+click==8.3.1
+    # via
+    #   typer
+    #   vps-fastsearch (pyproject.toml)
+coverage==7.13.4
+    # via pytest-cov
+fastembed==0.7.4
+    # via vps-fastsearch (pyproject.toml)
+filelock==3.24.3
+    # via
+    #   huggingface-hub
+    #   torch
+    #   transformers
+flatbuffers==25.12.19
+    # via onnxruntime
+fsspec==2026.2.0
+    # via
+    #   huggingface-hub
+    #   torch
+hf-xet==1.3.2
+    # via huggingface-hub
+huggingface-hub==0.36.2
+    # via
+    #   fastembed
+    #   sentence-transformers
+    #   tokenizers
+    #   transformers
+idna==3.11
+    # via
+    #   anyio
+    #   httpx
+    #   requests
+iniconfig==2.3.0
+    # via pytest
+jinja2==3.1.6
+    # via torch
+joblib==1.5.3
+    # via scikit-learn
+librt==0.8.1
+    # via mypy
+loguru==0.7.3
+    # via fastembed
+markupsafe==3.0.3
+    # via jinja2
+mmh3==5.2.0
+    # via fastembed
+mpmath==1.3.0
+    # via sympy
+mypy==1.19.1
+    # via vps-fastsearch (pyproject.toml)
+mypy-extensions==1.1.0
+    # via mypy
+networkx==3.6.1
+    # via torch
+numpy==2.4.2
+    # via
+    #   fastembed
+    #   onnxruntime
+    #   scikit-learn
+    #   scipy
+    #   transformers
+onnxruntime==1.24.2
+    # via
+    #   fastembed
+    #   vps-fastsearch (pyproject.toml)
+orjson==3.11.7
+    # via vps-fastsearch (pyproject.toml)
+packaging==26.0
+    # via
+    #   huggingface-hub
+    #   onnxruntime
+    #   pytest
+    #   transformers
+pathspec==1.0.4
+    # via mypy
+pillow==11.3.0
+    # via
+    #   fastembed
+    #   sentence-transformers
+pluggy==1.6.0
+    # via
+    #   pytest
+    #   pytest-cov
+protobuf==7.34.0
+    # via onnxruntime
+psutil==6.1.1
+    # via vps-fastsearch (pyproject.toml)
+py-rust-stemmers==0.1.5
+    # via fastembed
+pygments==2.19.2
+    # via
+    #   pytest
+    #   rich
+pytest==9.0.2
+    # via
+    #   pytest-cov
+    #   vps-fastsearch (pyproject.toml)
+pytest-cov==7.0.0
+    # via vps-fastsearch (pyproject.toml)
+pyyaml==6.0.3
+    # via
+    #   huggingface-hub
+    #   transformers
+    #   vps-fastsearch (pyproject.toml)
+regex==2026.2.28
+    # via transformers
+requests==2.32.5
+    # via
+    #   fastembed
+    #   huggingface-hub
+    #   transformers
+ruff==0.15.4
+    # via vps-fastsearch (pyproject.toml)
+safetensors==0.7.0
+    # via transformers
+scikit-learn==1.8.0
+    # via sentence-transformers
+scipy==1.17.1
+    # via
+    #   scikit-learn
+    #   sentence-transformers
+sentence-transformers==3.4.1
+    # via vps-fastsearch (pyproject.toml)
+sqlite-vec==0.1.6
+    # via vps-fastsearch (pyproject.toml)
+sympy==1.14.0
+    # via
+    #   onnxruntime
+    #   torch
+threadpoolctl==3.6.0
+    # via scikit-learn
+tokenizers==0.22.2
+    # via
+    #   fastembed
+    #   transformers
+torch==2.10.0
+    # via sentence-transformers
+tqdm==4.67.3
+    # via
+    #   fastembed
+    #   huggingface-hub
+    #   sentence-transformers
+    #   transformers
+transformers==4.57.6
+    # via sentence-transformers
+types-pyyaml==6.0.12.20250915
+    # via vps-fastsearch (pyproject.toml)
+typing-extensions==4.15.0
+    # via
+    #   huggingface-hub
+    #   mypy
+    #   torch
+urllib3==2.6.3
+    # via requests
+
+# The following packages are considered to be unsafe in a requirements file:
+# setuptools

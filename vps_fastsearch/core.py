@@ -14,7 +14,7 @@ import sqlite_vec
 logger = logging.getLogger(__name__)
 
 # Schema version for migration tracking (via PRAGMA user_version)
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Lazy import fastembed to speed up CLI startup
 _embedder_instance = None
@@ -198,6 +198,52 @@ class SearchDB:
     EMBEDDING_DIM = 768
     MAX_SEARCH_LIMIT = 10000
 
+    # Allowed types for metadata filter values
+    _METADATA_FILTER_TYPES = (str, int, float, bool)
+
+    @staticmethod
+    def _build_metadata_filter(
+        metadata_filter: dict[str, Any] | None,
+    ) -> tuple[str, tuple[Any, ...]]:
+        """Build SQL WHERE clause fragment for metadata filtering.
+
+        Args:
+            metadata_filter: Dict of key-value pairs for exact match on top-level
+                metadata keys. Supported value types: str, int, float, bool.
+
+        Returns:
+            Tuple of (sql_fragment, params) where sql_fragment is empty string
+            if no filters, or " AND json_extract(...) = ? AND ..." otherwise.
+
+        Raises:
+            ValueError: If a filter value has an unsupported type.
+        """
+        if not metadata_filter:
+            return "", ()
+
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        for key, value in metadata_filter.items():
+            if not isinstance(key, str):
+                raise ValueError(f"Metadata filter key must be a string, got {type(key).__name__}")
+            if not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_.]*", key):
+                raise ValueError(f"Invalid metadata filter key: {key!r}")
+            if not isinstance(value, (str, int, float, bool)):
+                raise ValueError(
+                    f"Metadata filter value for '{key}' must be str, int, float, or bool, "
+                    f"got {type(value).__name__}"
+                )
+            clauses.append(f"json_extract(d.metadata, '$.{key}') = ?")
+            # SQLite stores JSON booleans as 1/0
+            if isinstance(value, bool):
+                params.append(1 if value else 0)
+            else:
+                params.append(value)
+
+        sql = " AND " + " AND ".join(clauses)
+        return sql, tuple(params)
+
     def __init__(self, db_path: str | Path | None = None) -> None:
         if db_path is None:
             from .config import DEFAULT_DB_PATH
@@ -282,10 +328,13 @@ class SearchDB:
             END
         """)
 
+        # Recreate the UPDATE trigger unconditionally to fix a bug in earlier
+        # versions where the second INSERT used 3 column names but only 2 values.
+        self._execute("DROP TRIGGER IF EXISTS docs_au")
         self._execute("""
-            CREATE TRIGGER IF NOT EXISTS docs_au AFTER UPDATE ON docs BEGIN
+            CREATE TRIGGER docs_au AFTER UPDATE ON docs BEGIN
                 INSERT INTO docs_fts(docs_fts, rowid, content) VALUES('delete', old.id, old.content);
-                INSERT INTO docs_fts(docs_fts, rowid, content) VALUES (new.id, new.content);
+                INSERT INTO docs_fts(rowid, content) VALUES (new.id, new.content);
             END
         """)
 
@@ -294,6 +343,14 @@ class SearchDB:
             CREATE VIRTUAL TABLE IF NOT EXISTS docs_vec USING vec0(
                 id INTEGER PRIMARY KEY,
                 embedding float32[768]
+            )
+        """)
+
+        # Key-value metadata table for DB-level settings (e.g. base_dir)
+        self._execute("""
+            CREATE TABLE IF NOT EXISTS db_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             )
         """)
 
@@ -312,9 +369,9 @@ class SearchDB:
             )
 
         if current_version < SCHEMA_VERSION:
-            # For now, no migrations needed — legacy DBs (version 0) are compatible
-            # with version 1. Future migrations would go here as:
-            #   if current_version < 2: _migrate_v1_to_v2()
+            if current_version < 2:
+                # v1 -> v2: add db_meta table (CREATE IF NOT EXISTS already ran above)
+                logger.info("Migrating database schema v1 -> v2: adding db_meta table")
             logger.info(
                 f"Updating database schema version from {current_version} to {SCHEMA_VERSION}"
             )
@@ -419,9 +476,16 @@ class SearchDB:
         self,
         query: str,
         limit: int = 10,
+        metadata_filter: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Full-text search using BM25 ranking.
+
+        Args:
+            query: Search query text.
+            limit: Maximum number of results.
+            metadata_filter: Optional dict of key-value pairs for exact match
+                on top-level metadata keys. All conditions are ANDed together.
 
         Returns list of results with id, source, content, score, rank.
         """
@@ -438,8 +502,10 @@ class SearchDB:
             return []
         fts_query = " OR ".join(f'"{t}"' for t in tokens)
 
+        meta_sql, meta_params = self._build_metadata_filter(metadata_filter)
+
         cursor = self._execute(
-            """
+            f"""
             SELECT
                 d.id,
                 d.source,
@@ -449,11 +515,11 @@ class SearchDB:
                 bm25(docs_fts) as score
             FROM docs_fts f
             JOIN docs d ON f.rowid = d.id
-            WHERE docs_fts MATCH ?
+            WHERE docs_fts MATCH ?{meta_sql}
             ORDER BY score
             LIMIT ?
             """,
-            (fts_query, limit),
+            (fts_query, *meta_params, limit),
         )
 
         results = []
@@ -477,9 +543,19 @@ class SearchDB:
         self,
         embedding: list[float],
         limit: int = 10,
+        metadata_filter: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Vector similarity search using cosine distance.
+
+        Args:
+            embedding: Query embedding vector (768 dimensions).
+            limit: Maximum number of results.
+            metadata_filter: Optional dict of key-value pairs for exact match
+                on top-level metadata keys. All conditions are ANDed together.
+                Note: When filtering, more candidates are fetched from the vector
+                index and then post-filtered, so results may be fewer than limit
+                if few documents match the filter.
 
         Returns list of results with id, source, content, distance, rank.
         """
@@ -491,23 +567,48 @@ class SearchDB:
 
         if len(embedding) != self.EMBEDDING_DIM:
             raise ValueError(f"Expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}")
-        cursor = self._execute(
-            """
-            SELECT
-                v.id,
-                v.distance,
-                d.source,
-                d.chunk_index,
-                d.content,
-                d.metadata
-            FROM docs_vec v
-            JOIN docs d ON v.id = d.id
-            WHERE embedding MATCH ?
-                AND k = ?
-            ORDER BY distance
-            """,
-            (sqlite_vec.serialize_float32(embedding), limit),
-        )
+
+        meta_sql, meta_params = self._build_metadata_filter(metadata_filter)
+
+        # sqlite-vec virtual tables don't support additional WHERE clauses,
+        # so when filtering we over-fetch and post-filter via a subquery.
+        if meta_sql:
+            fetch_limit = min(limit * 5, self.MAX_SEARCH_LIMIT)
+            cursor = self._execute(
+                f"""
+                SELECT sub.id, sub.distance, d.source, d.chunk_index, d.content, d.metadata
+                FROM (
+                    SELECT v.id, v.distance
+                    FROM docs_vec v
+                    WHERE embedding MATCH ?
+                        AND k = ?
+                    ORDER BY distance
+                ) sub
+                JOIN docs d ON sub.id = d.id
+                WHERE 1=1{meta_sql}
+                ORDER BY sub.distance
+                LIMIT ?
+                """,
+                (sqlite_vec.serialize_float32(embedding), fetch_limit, *meta_params, limit),
+            )
+        else:
+            cursor = self._execute(
+                """
+                SELECT
+                    v.id,
+                    v.distance,
+                    d.source,
+                    d.chunk_index,
+                    d.content,
+                    d.metadata
+                FROM docs_vec v
+                JOIN docs d ON v.id = d.id
+                WHERE embedding MATCH ?
+                    AND k = ?
+                ORDER BY distance
+                """,
+                (sqlite_vec.serialize_float32(embedding), limit),
+            )
 
         results = []
         for rank, row in enumerate(cursor, 1):
@@ -534,11 +635,22 @@ class SearchDB:
         k: int = 60,
         bm25_weight: float = 1.0,
         vec_weight: float = 1.0,
+        metadata_filter: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Hybrid search combining BM25 and vector search using RRF.
 
         RRF score = weight_bm25 * 1/(k + bm25_rank) + weight_vec * 1/(k + vec_rank)
+
+        Args:
+            query: Search query text.
+            embedding: Query embedding vector (768 dimensions).
+            limit: Maximum number of results.
+            k: RRF parameter (default 60).
+            bm25_weight: Weight for BM25 scores in RRF fusion.
+            vec_weight: Weight for vector scores in RRF fusion.
+            metadata_filter: Optional dict of key-value pairs for exact match
+                on top-level metadata keys. All conditions are ANDed together.
 
         Returns list of results sorted by RRF score (descending).
         """
@@ -556,8 +668,14 @@ class SearchDB:
 
         # Skip BM25 if query has no word tokens (symbols, emoji, etc.)
         tokens = re.findall(r"\w+", query)
-        bm25_results = self.search_bm25(query, limit=fetch_limit) if tokens else []
-        vec_results = self.search_vector(embedding, limit=fetch_limit)
+        bm25_results = (
+            self.search_bm25(query, limit=fetch_limit, metadata_filter=metadata_filter)
+            if tokens
+            else []
+        )
+        vec_results = self.search_vector(
+            embedding, limit=fetch_limit, metadata_filter=metadata_filter
+        )
 
         # Build rank maps
         bm25_ranks = {r["id"]: r["rank"] for r in bm25_results}
@@ -604,6 +722,7 @@ class SearchDB:
         limit: int = 10,
         rerank_top_k: int = 20,
         reranker: Any = None,
+        metadata_filter: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Hybrid search with cross-encoder reranking.
@@ -618,6 +737,7 @@ class SearchDB:
             limit: Final number of results to return
             rerank_top_k: Number of candidates to fetch for reranking
             reranker: Optional Reranker instance (uses singleton if None)
+            metadata_filter: Optional key=value metadata filter dict
 
         Returns:
             List of results sorted by reranker score (descending).
@@ -629,7 +749,9 @@ class SearchDB:
         limit = min(limit, self.MAX_SEARCH_LIMIT)
 
         # Get candidates from hybrid search
-        candidates = self.search_hybrid(query, embedding, limit=rerank_top_k)
+        candidates = self.search_hybrid(
+            query, embedding, limit=rerank_top_k, metadata_filter=metadata_filter
+        )
 
         if not candidates:
             return []
@@ -688,6 +810,79 @@ class SearchDB:
 
         return int(count)
 
+    def delete_by_id(self, doc_id: int) -> bool:
+        """Delete a single document by ID. Returns True if a row was deleted."""
+        # Check existence first so we know whether anything was deleted
+        row = list(self._execute("SELECT id FROM docs WHERE id = ?", (doc_id,)))
+        if not row:
+            return False
+
+        self.conn.execute("BEGIN")
+        try:
+            # Delete from vector table first (no trigger for this)
+            self._execute("DELETE FROM docs_vec WHERE id = ?", (doc_id,))
+            # Delete from docs (triggers handle FTS sync)
+            self._execute("DELETE FROM docs WHERE id = ?", (doc_id,))
+            self.conn.execute("COMMIT")
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+
+        return True
+
+    def update_content(self, doc_id: int, content: str, embedding: list[float]) -> bool:
+        """Update content and embedding for a document. Returns True if updated."""
+        if len(embedding) != self.EMBEDDING_DIM:
+            raise ValueError(f"Expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}")
+
+        row = list(self._execute("SELECT id FROM docs WHERE id = ?", (doc_id,)))
+        if not row:
+            return False
+
+        self.conn.execute("BEGIN")
+        try:
+            # Update docs table (trigger handles FTS delete-old + insert-new)
+            self._execute(
+                "UPDATE docs SET content = ? WHERE id = ?",
+                (content, doc_id),
+            )
+            # Update vector table — sqlite-vec vec0 doesn't support UPDATE, so
+            # delete + re-insert.  Use positional VALUES (not named columns)
+            # to work around a vec0 quirk after DELETE in the same transaction.
+            self._execute("DELETE FROM docs_vec WHERE id = ?", (doc_id,))
+            self._execute(
+                "INSERT INTO docs_vec VALUES (?, ?)",
+                (doc_id, sqlite_vec.serialize_float32(embedding)),
+            )
+            self.conn.execute("COMMIT")
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+
+        return True
+
+    def list_sources(self) -> list[dict[str, Any]]:
+        """List all unique sources with chunk counts and ID ranges."""
+        cursor = self._execute(
+            "SELECT source, COUNT(*) as chunks, MIN(id) as min_id, MAX(id) as max_id "
+            "FROM docs GROUP BY source ORDER BY source"
+        )
+        return [
+            {
+                "source": row[0],
+                "chunks": row[1],
+                "min_id": row[2],
+                "max_id": row[3],
+            }
+            for row in cursor
+        ]
+
     def get_stats(self) -> dict[str, Any]:
         """Get database statistics."""
         doc_count = list(self._execute("SELECT COUNT(*) FROM docs"))[0][0]
@@ -710,6 +905,73 @@ class SearchDB:
             "db_size_bytes": db_size,
             "db_size_mb": round(db_size / (1024 * 1024), 2),
         }
+
+    # ------------------------------------------------------------------
+    # Metadata helpers
+    # ------------------------------------------------------------------
+
+    def get_meta(self, key: str) -> str | None:
+        """Get a value from the db_meta table, or None if not set."""
+        rows = list(self._execute("SELECT value FROM db_meta WHERE key = ?", (key,)))
+        if rows:
+            result: str = rows[0][0]
+            return result
+        return None
+
+    def set_meta(self, key: str, value: str) -> None:
+        """Set a key-value pair in the db_meta table (upsert)."""
+        self._execute(
+            "INSERT INTO db_meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+
+    # ------------------------------------------------------------------
+    # Portable path helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def base_dir(self) -> Path:
+        """Return the base directory for resolving relative source paths.
+
+        Defaults to the directory containing the database file.  Can be
+        overridden by storing a ``base_dir`` value in the ``db_meta`` table.
+        """
+        stored = self.get_meta("base_dir")
+        if stored:
+            return Path(stored)
+        return self.db_path.parent
+
+    def set_base_dir(self, directory: str | Path) -> None:
+        """Persist a custom base directory for relative path resolution."""
+        self.set_meta("base_dir", str(Path(directory).resolve()))
+
+    def to_relative(self, abs_path: str | Path) -> str:
+        """Convert an absolute path to a path relative to *base_dir*.
+
+        If the path is already relative or cannot be made relative to
+        *base_dir*, it is returned unchanged.
+        """
+        p = Path(abs_path)
+        if not p.is_absolute():
+            return str(abs_path)
+        try:
+            return str(p.relative_to(self.base_dir))
+        except ValueError:
+            # abs_path is not under base_dir — try os.path.relpath which
+            # always succeeds and produces ``../../`` style paths.
+            return os.path.relpath(str(p), str(self.base_dir))
+
+    def to_absolute(self, rel_path: str | Path) -> str:
+        """Resolve a stored (possibly relative) path to an absolute path.
+
+        Absolute paths pass through unchanged for backward compatibility
+        with databases that already contain absolute source paths.
+        """
+        p = Path(rel_path)
+        if p.is_absolute():
+            return str(p)
+        return str((self.base_dir / p).resolve())
 
     def close(self) -> None:
         """Close database connection."""

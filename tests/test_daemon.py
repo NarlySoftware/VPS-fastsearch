@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -499,6 +500,249 @@ class TestHandleRequest:
         daemon = self._make_daemon()
         self._run(daemon._handle_request(b"bad json"))
         assert daemon._request_count == 0
+
+
+# ---------------------------------------------------------------------------
+# batch_index handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleBatchIndex:
+    """Tests for the batch_index RPC handler."""
+
+    def _make_daemon(self) -> FastSearchDaemon:
+        config = _make_config()
+        return FastSearchDaemon(config)
+
+    def _run(self, coro: Any) -> Any:
+        return asyncio.run(coro)
+
+    def _make_document(
+        self,
+        source: str = "test.txt",
+        chunk_index: int = 0,
+        content: str = "hello world",
+    ) -> dict[str, Any]:
+        """Create a valid document dict with a 768-dim embedding."""
+        return {
+            "source": source,
+            "chunk_index": chunk_index,
+            "content": content,
+            "embedding": [0.1] * 768,
+            "metadata": {"tag": "test"},
+        }
+
+    def test_batch_index_valid_documents(self, tmp_path: Any) -> None:
+        """batch_index with valid documents returns indexed count."""
+        daemon = self._make_daemon()
+        db_path = str(tmp_path / "test.db")
+
+        # Patch _get_db to return a real SearchDB at the tmp_path
+        from vps_fastsearch.core import SearchDB
+
+        db = SearchDB(db_path)
+        db_lock = threading.Lock()
+        daemon._db_cache[str(tmp_path / "test.db")] = (db, db_lock)
+        with patch.object(daemon, "_get_db", return_value=(db, db_lock)):
+            docs = [
+                self._make_document("a.txt", 0, "first document"),
+                self._make_document("b.txt", 0, "second document"),
+            ]
+            payload = orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "batch_index",
+                    "params": {"db_path": db_path, "documents": docs},
+                    "id": 1,
+                }
+            )
+            response = orjson.loads(self._run(daemon._handle_request(payload)))
+
+        assert "result" in response
+        assert response["result"]["indexed"] == 2
+        assert len(response["result"]["doc_ids"]) == 2
+        assert "index_time_ms" in response["result"]
+        db.close()
+
+    def test_batch_index_empty_documents(self, tmp_path: Any) -> None:
+        """batch_index with empty documents list returns indexed=0."""
+        daemon = self._make_daemon()
+        db_path = str(tmp_path / "test.db")
+
+        from vps_fastsearch.core import SearchDB
+
+        db = SearchDB(db_path)
+        db_lock = threading.Lock()
+        daemon._db_cache[str(tmp_path / "test.db")] = (db, db_lock)
+        with patch.object(daemon, "_get_db", return_value=(db, db_lock)):
+            payload = orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "batch_index",
+                    "params": {"db_path": db_path, "documents": []},
+                    "id": 1,
+                }
+            )
+            response = orjson.loads(self._run(daemon._handle_request(payload)))
+
+        assert "result" in response
+        assert response["result"]["indexed"] == 0
+        assert response["result"]["doc_ids"] == []
+        db.close()
+
+    def test_batch_index_missing_documents_param(self) -> None:
+        """batch_index without documents param returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "batch_index",
+                "params": {"db_path": "/tmp/test.db"},
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "documents" in response["error"]["message"]
+
+    def test_batch_index_documents_not_list(self) -> None:
+        """batch_index with documents as string returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "batch_index",
+                "params": {"documents": "not a list"},
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "documents" in response["error"]["message"]
+
+    def test_batch_index_document_not_dict(self) -> None:
+        """batch_index with a non-dict document returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "batch_index",
+                "params": {"documents": ["not a dict"]},
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "index 0" in response["error"]["message"]
+
+    def test_batch_index_missing_required_fields(self) -> None:
+        """batch_index with missing required fields returns -32602."""
+        daemon = self._make_daemon()
+        # Document missing 'content' and 'embedding'
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "batch_index",
+                "params": {
+                    "documents": [{"source": "a.txt", "chunk_index": 0}],
+                },
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "missing required fields" in response["error"]["message"]
+
+    def test_batch_index_invalid_source_type(self) -> None:
+        """batch_index with non-string source returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "batch_index",
+                "params": {
+                    "documents": [
+                        {
+                            "source": 123,
+                            "chunk_index": 0,
+                            "content": "text",
+                            "embedding": [0.1] * 768,
+                        }
+                    ],
+                },
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "source" in response["error"]["message"]
+
+    def test_batch_index_invalid_chunk_index_type(self) -> None:
+        """batch_index with non-integer chunk_index returns -32602."""
+        daemon = self._make_daemon()
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "batch_index",
+                "params": {
+                    "documents": [
+                        {
+                            "source": "a.txt",
+                            "chunk_index": "zero",
+                            "content": "text",
+                            "embedding": [0.1] * 768,
+                        }
+                    ],
+                },
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "chunk_index" in response["error"]["message"]
+
+    def test_batch_index_too_many_documents(self) -> None:
+        """batch_index with >1000 documents returns -32602."""
+        daemon = self._make_daemon()
+        docs = [self._make_document(f"doc{i}.txt", i) for i in range(1001)]
+        payload = orjson.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "batch_index",
+                "params": {"documents": docs},
+                "id": 1,
+            }
+        )
+        response = orjson.loads(self._run(daemon._handle_request(payload)))
+        assert response["error"]["code"] == -32602
+        assert "Too many documents" in response["error"]["message"]
+
+    def test_batch_index_with_null_metadata(self, tmp_path: Any) -> None:
+        """batch_index with null metadata succeeds."""
+        daemon = self._make_daemon()
+        db_path = str(tmp_path / "test.db")
+
+        from vps_fastsearch.core import SearchDB
+
+        db = SearchDB(db_path)
+        db_lock = threading.Lock()
+        daemon._db_cache[str(tmp_path / "test.db")] = (db, db_lock)
+        with patch.object(daemon, "_get_db", return_value=(db, db_lock)):
+            doc = self._make_document()
+            doc["metadata"] = None
+            payload = orjson.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "batch_index",
+                    "params": {"db_path": db_path, "documents": [doc]},
+                    "id": 1,
+                }
+            )
+            response = orjson.loads(self._run(daemon._handle_request(payload)))
+
+        assert "result" in response
+        assert response["result"]["indexed"] == 1
+        db.close()
 
 
 # ---------------------------------------------------------------------------

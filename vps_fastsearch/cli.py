@@ -134,9 +134,11 @@ def daemon_reload(ctx: click.Context, config_path: str | None) -> None:
 
     try:
         client = FastSearchClient(config_path=config_path)
-        client.reload_config(config_path)
-        client.close()
-        click.echo("Configuration reloaded")
+        try:
+            client.reload_config(config_path)
+            click.echo("Configuration reloaded")
+        finally:
+            client.close()
     except DaemonNotRunningError:
         click.echo("Daemon is not running", err=True)
         sys.exit(1)
@@ -184,106 +186,121 @@ def config_path() -> None:
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--glob", "-g", default="*.md", help="Glob pattern for directory indexing")
 @click.option("--reindex", is_flag=True, help="Delete existing chunks before indexing")
+@click.option(
+    "--base-dir",
+    default=None,
+    type=click.Path(exists=True, file_okay=False),
+    help="Base directory for relative path storage (default: DB file's parent directory)",
+)
 @click.pass_context
-def index(ctx: click.Context, path: str, glob: str, reindex: bool) -> None:
+def index(ctx: click.Context, path: str, glob: str, reindex: bool, base_dir: str | None) -> None:
     """Index a file or directory of documents."""
-    index_path = Path(path)
+    index_path = Path(path).resolve()
     db = SearchDB(ctx.obj["db_path"])
 
-    # Collect files to index
-    if index_path.is_file():
-        files = [index_path]
-    else:
-        files = list(index_path.glob(glob))
-        if not files:
-            click.echo(f"No files matching '{glob}' in {index_path}", err=True)
-            return
-
-    click.echo(f"Indexing {len(files)} file(s)...")
-
-    # Try to use daemon for embedding, fall back to direct
-    use_daemon = False
-    client = None
-
     try:
-        client = FastSearchClient(config_path=ctx.obj.get("config_path"), timeout=60.0)
-        if client.ping():
-            use_daemon = True
-            click.echo("Using daemon for embedding...")
-    except (OSError, ConnectionError, TimeoutError):
-        pass
+        # Set up base directory for portable relative path storage
+        if base_dir is not None:
+            db.set_base_dir(base_dir)
 
-    if not use_daemon:
-        click.echo("Loading embedding model...", nl=False)
-        t0 = time.perf_counter()
-        embedder = Embedder.get_instance()
-        model_time = time.perf_counter() - t0
-        click.echo(f" done ({model_time:.2f}s)")
+        # Collect files to index
+        if index_path.is_file():
+            files = [index_path]
+        else:
+            files = list(index_path.glob(glob))
+            if not files:
+                click.echo(f"No files matching '{glob}' in {index_path}", err=True)
+                return
 
-    total_chunks = 0
-    total_time = 0.0
+        click.echo(f"Indexing {len(files)} file(s)...")
 
-    for file_path in files:
-        source = str(file_path)
+        # Try to use daemon for embedding, fall back to direct
+        use_daemon = False
+        client = None
 
-        # Delete existing if reindexing
-        if reindex:
-            deleted = db.delete_source(source)
-            if deleted:
-                click.echo(f"  Deleted {deleted} existing chunks from {file_path.name}")
-
-        # Read file
         try:
-            content = file_path.read_text(encoding="utf-8")
-        except Exception as e:
-            click.echo(f"  Error reading {file_path}: {e}", err=True)
-            continue
+            client = FastSearchClient(config_path=ctx.obj.get("config_path"), timeout=60.0)
+            if client.ping():
+                use_daemon = True
+                click.echo("Using daemon for embedding...")
+        except (OSError, ConnectionError, TimeoutError):
+            pass
 
-        # Chunk based on file type
-        if file_path.suffix.lower() == ".md":
-            chunks = list(chunk_markdown(content))
-        else:
-            chunks = [(c, {}) for c in chunk_text(content)]
+        try:
+            if not use_daemon:
+                click.echo("Loading embedding model...", nl=False)
+                t0 = time.perf_counter()
+                embedder = Embedder.get_instance()
+                model_time = time.perf_counter() - t0
+                click.echo(f" done ({model_time:.2f}s)")
 
-        if not chunks:
-            click.echo(f"  Skipping {file_path.name} (no content)")
-            continue
+            total_chunks = 0
+            total_time = 0.0
 
-        # Generate embeddings
-        t0 = time.perf_counter()
-        texts = [c[0] for c in chunks]
+            for file_path in files:
+                source = db.to_relative(file_path.resolve())
 
-        if use_daemon:
-            assert client is not None
-            result = client.embed(texts)
-            embeddings = result.get("embeddings", [])
-        else:
-            embeddings = embedder.embed(texts)
+                # Delete existing if reindexing
+                if reindex:
+                    deleted = db.delete_source(source)
+                    if deleted:
+                        click.echo(f"  Deleted {deleted} existing chunks from {file_path.name}")
 
-        embed_time = time.perf_counter() - t0
+                # Read file
+                try:
+                    content = file_path.read_text(encoding="utf-8")
+                except Exception as e:
+                    click.echo(f"  Error reading {file_path}: {e}", err=True)
+                    continue
 
-        # Index chunks
-        t0 = time.perf_counter()
-        items: list[tuple[str, int, str, list[float], dict[str, Any] | None]] = []
-        for i, ((text, metadata), embedding) in enumerate(zip(chunks, embeddings, strict=True)):
-            items.append((source, i, text, embedding, metadata))
+                # Chunk based on file type
+                if file_path.suffix.lower() == ".md":
+                    chunks = list(chunk_markdown(content))
+                else:
+                    chunks = [(c, {}) for c in chunk_text(content)]
 
-        db.index_batch(items)
-        index_time = time.perf_counter() - t0
+                if not chunks:
+                    click.echo(f"  Skipping {file_path.name} (no content)")
+                    continue
 
-        total_chunks += len(chunks)
-        total_time += embed_time + index_time
+                # Generate embeddings
+                t0 = time.perf_counter()
+                texts = [c[0] for c in chunks]
 
-        click.echo(
-            f"  {file_path.name}: {len(chunks)} chunks "
-            f"(embed: {embed_time:.2f}s, index: {index_time:.3f}s)"
-        )
+                if use_daemon:
+                    assert client is not None
+                    result = client.embed(texts)
+                    embeddings = result.get("embeddings", [])
+                else:
+                    embeddings = embedder.embed(texts)
 
-    if client:
-        client.close()
+                embed_time = time.perf_counter() - t0
 
-    db.close()
-    click.echo(f"\nIndexed {total_chunks} chunks in {total_time:.2f}s")
+                # Index chunks
+                t0 = time.perf_counter()
+                items: list[tuple[str, int, str, list[float], dict[str, Any] | None]] = []
+                for i, ((text, metadata), embedding) in enumerate(
+                    zip(chunks, embeddings, strict=True)
+                ):
+                    items.append((source, i, text, embedding, metadata))
+
+                db.index_batch(items)
+                index_time = time.perf_counter() - t0
+
+                total_chunks += len(chunks)
+                total_time += embed_time + index_time
+
+                click.echo(
+                    f"  {file_path.name}: {len(chunks)} chunks "
+                    f"(embed: {embed_time:.2f}s, index: {index_time:.3f}s)"
+                )
+
+            click.echo(f"\nIndexed {total_chunks} chunks in {total_time:.2f}s")
+        finally:
+            if client:
+                client.close()
+    finally:
+        db.close()
 
 
 # ============================================================================
@@ -298,6 +315,13 @@ def index(ctx: click.Context, path: str, glob: str, reindex: bool) -> None:
 @click.option("--rerank", "-r", is_flag=True, help="Use cross-encoder reranking")
 @click.option("--no-daemon", is_flag=True, help="Force direct mode (no daemon)")
 @click.option("--json", "output_json", is_flag=True, help="Output as JSON")
+@click.option(
+    "--filter",
+    "-f",
+    "filters",
+    multiple=True,
+    help="Metadata filter as key=value (repeatable, AND logic)",
+)
 @click.pass_context
 def search(
     ctx: click.Context,
@@ -307,10 +331,37 @@ def search(
     rerank: bool,
     no_daemon: bool,
     output_json: bool,
+    filters: tuple[str, ...],
 ) -> None:
     """Search indexed documents."""
     db_path = ctx.obj["db_path"]
     config_path = ctx.obj.get("config_path")
+
+    # Parse --filter key=value pairs into a dict
+    metadata_filter: dict[str, Any] | None = None
+    if filters:
+        metadata_filter = {}
+        for f in filters:
+            if "=" not in f:
+                click.echo(f"Invalid filter format: '{f}' (expected key=value)", err=True)
+                sys.exit(1)
+            key, value = f.split("=", 1)
+            if not key:
+                click.echo(f"Invalid filter: empty key in '{f}'", err=True)
+                sys.exit(1)
+            # Try to parse numeric/boolean values
+            if value.lower() == "true":
+                metadata_filter[key] = True
+            elif value.lower() == "false":
+                metadata_filter[key] = False
+            else:
+                try:
+                    metadata_filter[key] = int(value)
+                except ValueError:
+                    try:
+                        metadata_filter[key] = float(value)
+                    except ValueError:
+                        metadata_filter[key] = value
 
     # Try daemon first unless --no-daemon
     use_daemon = False
@@ -326,96 +377,137 @@ def search(
 
     t0 = time.perf_counter()
 
-    if use_daemon:
-        # Use daemon for search
-        assert client is not None
-        result = client.search(
-            query=query,
-            db_path=db_path,
-            limit=limit,
-            mode=mode,
-            rerank=rerank,
-        )
-        results = result.get("results", [])
-        client.close()
-    else:
-        # Direct search
-        if not Path(db_path).exists():
-            click.echo(
-                f"Database not found at {db_path}. "
-                "Run 'vps-fastsearch index <path>' to create it, "
-                "or start the daemon with 'vps-fastsearch daemon start'.",
-                err=True,
-            )
-            sys.exit(1)
-        db = SearchDB(db_path)
+    try:
+        if use_daemon:
+            # Use daemon for search
+            assert client is not None
+            try:
+                result = client.search(
+                    query=query,
+                    db_path=db_path,
+                    limit=limit,
+                    mode=mode,
+                    rerank=rerank,
+                    metadata_filter=metadata_filter,
+                )
+                results = result.get("results", [])
+            finally:
+                client.close()
+                client = None
+        else:
+            # Direct search
+            if not Path(db_path).exists():
+                click.echo(
+                    f"Database not found at {db_path}. "
+                    "Run 'vps-fastsearch index <path>' to create it, "
+                    "or start the daemon with 'vps-fastsearch daemon start'.",
+                    err=True,
+                )
+                sys.exit(1)
+            db = SearchDB(db_path)
 
-        if mode == "bm25":
-            results = db.search_bm25(query, limit=limit)
-        elif mode == "vector":
-            embedder = Embedder.get_instance()
-            embedding = embedder.embed_single(query)
-            results = db.search_vector(embedding, limit=limit)
-        else:  # hybrid
-            embedder = Embedder.get_instance()
-            embedding = embedder.embed_single(query)
-
-            if rerank:
-                try:
-                    results = db.search_hybrid_reranked(
-                        query,
-                        embedding,
-                        limit=limit,
-                        rerank_top_k=min(limit * 3, 30),
+            try:
+                if mode == "bm25":
+                    results = db.search_bm25(query, limit=limit, metadata_filter=metadata_filter)
+                elif mode == "vector":
+                    embedder = Embedder.get_instance()
+                    embedding = embedder.embed_single(query)
+                    results = db.search_vector(
+                        embedding, limit=limit, metadata_filter=metadata_filter
                     )
-                except ImportError as e:
-                    click.echo(f"Error: {e}", err=True)
-                    sys.exit(1)
+                else:  # hybrid
+                    embedder = Embedder.get_instance()
+                    embedding = embedder.embed_single(query)
+
+                    if rerank:
+                        try:
+                            results = db.search_hybrid_reranked(
+                                query,
+                                embedding,
+                                limit=limit,
+                                rerank_top_k=min(limit * 3, 30),
+                                metadata_filter=metadata_filter,
+                            )
+                        except ImportError as e:
+                            click.echo(f"Error: {e}", err=True)
+                            sys.exit(1)
+                    else:
+                        results = db.search_hybrid(
+                            query,
+                            embedding,
+                            limit=limit,
+                            metadata_filter=metadata_filter,
+                        )
+            except BaseException:
+                db.close()
+                raise
+
+            # Keep db reference for path resolution below; close after display.
+
+        search_time = time.perf_counter() - t0
+
+        # Resolve relative source paths back to absolute for display.
+        resolve_db: SearchDB | None
+        if use_daemon:
+            if Path(db_path).exists():
+                resolve_db = SearchDB(db_path)
             else:
-                results = db.search_hybrid(query, embedding, limit=limit)
+                resolve_db = None
+        else:
+            resolve_db = db
 
-        db.close()
+        try:
+            if resolve_db is not None:
+                for r in results:
+                    r["source_abs"] = resolve_db.to_absolute(r["source"])
 
-    search_time = time.perf_counter() - t0
-
-    if output_json:
-        output = {
-            "query": query,
-            "mode": mode,
-            "reranked": rerank,
-            "daemon": use_daemon,
-            "search_time_ms": round(search_time * 1000, 2),
-            "results": results,
-        }
-        click.echo(orjson.dumps(output, option=orjson.OPT_INDENT_2).decode())
-    else:
-        daemon_info = " [daemon]" if use_daemon else ""
-        rerank_info = " +rerank" if rerank else ""
-        click.echo(
-            f"Search: '{query}' ({mode}{rerank_info}{daemon_info}, {search_time * 1000:.0f}ms)\n"
-        )
-
-        for r in results:
-            source = Path(r["source"]).name
-            preview = r["content"][:200].replace("\n", " ")
-            if len(r["content"]) > 200:
-                preview += "..."
-
-            if rerank and "rerank_score" in r:
-                score_info = f"Rerank: {r['rerank_score']:.4f}"
-            elif mode == "hybrid":
-                score_info = f"RRF: {r['rrf_score']:.4f}"
-                if r.get("bm25_rank"):
-                    score_info += f", BM25 #{r['bm25_rank']}"
-                if r.get("vec_rank"):
-                    score_info += f", Vec #{r['vec_rank']}"
-            elif mode == "bm25":
-                score_info = f"BM25: {r['score']:.2f}"
+            if output_json:
+                output = {
+                    "query": query,
+                    "mode": mode,
+                    "reranked": rerank,
+                    "daemon": use_daemon,
+                    "search_time_ms": round(search_time * 1000, 2),
+                    "results": results,
+                }
+                click.echo(orjson.dumps(output, option=orjson.OPT_INDENT_2).decode())
             else:
-                score_info = f"Dist: {r['distance']:.4f}"
+                daemon_info = " [daemon]" if use_daemon else ""
+                rerank_info = " +rerank" if rerank else ""
+                click.echo(
+                    f"Search: '{query}' ({mode}{rerank_info}{daemon_info},"
+                    f" {search_time * 1000:.0f}ms)\n"
+                )
 
-            click.echo(f"[{r['rank']}] {source} (chunk {r['chunk_index']}) - {score_info}")
-            click.echo(f"    {preview}\n")
+                for r in results:
+                    source = Path(r["source"]).name
+                    preview = r["content"][:200].replace("\n", " ")
+                    if len(r["content"]) > 200:
+                        preview += "..."
+
+                    if rerank and "rerank_score" in r:
+                        score_info = f"Rerank: {r['rerank_score']:.4f}"
+                    elif mode == "hybrid":
+                        score_info = f"RRF: {r['rrf_score']:.4f}"
+                        if r.get("bm25_rank"):
+                            score_info += f", BM25 #{r['bm25_rank']}"
+                        if r.get("vec_rank"):
+                            score_info += f", Vec #{r['vec_rank']}"
+                    elif mode == "bm25":
+                        score_info = f"BM25: {r['score']:.2f}"
+                    else:
+                        score_info = f"Dist: {r['distance']:.4f}"
+
+                    click.echo(f"[{r['rank']}] {source} (chunk {r['chunk_index']}) - {score_info}")
+                    click.echo(f"    {preview}\n")
+        finally:
+            # Close DB connections
+            if resolve_db is not None:
+                resolve_db.close()
+    finally:
+        # Clean up client if not closed yet (e.g., ping succeeded but search skipped)
+        if client is not None:
+            client.close()
 
 
 # ============================================================================
@@ -434,51 +526,109 @@ def stats(ctx: click.Context) -> None:
         return
 
     db = SearchDB(db_path)
-    stats = db.get_stats()
+    try:
+        stats = db.get_stats()
 
-    click.echo(f"Database: {db_path}")
-    click.echo(f"Size: {stats['db_size_mb']} MB")
-    click.echo(f"Total chunks: {stats['total_chunks']}")
-    click.echo(f"Total sources: {stats['total_sources']}")
+        click.echo(f"Database: {db_path}")
+        click.echo(f"Size: {stats['db_size_mb']} MB")
+        click.echo(f"Total chunks: {stats['total_chunks']}")
+        click.echo(f"Total sources: {stats['total_sources']}")
 
-    if stats["top_sources"]:
-        click.echo("\nTop sources by chunks:")
-        for s in stats["top_sources"]:
-            name = Path(s["source"]).name
-            click.echo(f"  {name}: {s['chunks']} chunks")
-
-    db.close()
+        if stats["top_sources"]:
+            click.echo("\nTop sources by chunks:")
+            for s in stats["top_sources"]:
+                name = Path(s["source"]).name
+                click.echo(f"  {name}: {s['chunks']} chunks")
+    finally:
+        db.close()
 
 
 @cli.command()
-@click.argument("source")
+@click.argument("source", required=False)
+@click.option("--id", "doc_id", type=int, default=None, help="Delete a single document by ID")
 @click.pass_context
-def delete(ctx: click.Context, source: str) -> None:
-    """Delete all chunks from a source file."""
+def delete(ctx: click.Context, source: str | None, doc_id: int | None) -> None:
+    """Delete documents by source name or by ID.
+
+    Provide a SOURCE name to delete all chunks for that source (supports partial match),
+    or use --id to delete a single document by its numeric ID.
+    """
+    if source is None and doc_id is None:
+        click.echo("Provide a SOURCE argument or --id option.", err=True)
+        sys.exit(1)
+
     db = SearchDB(ctx.obj["db_path"])
 
-    # Support partial match
-    cursor = db._execute("SELECT DISTINCT source FROM docs WHERE source LIKE ?", (f"%{source}%",))
-    matches = [row[0] for row in cursor]
+    try:
+        if doc_id is not None:
+            found = db.delete_by_id(doc_id)
+            if found:
+                click.echo(f"Deleted document ID {doc_id}")
+            else:
+                click.echo(f"No document with ID {doc_id}", err=True)
+            return
 
-    if not matches:
-        click.echo(f"No sources matching '{source}'", err=True)
+        assert source is not None  # for type checker
+
+        # Support partial match
+        cursor = db._execute(
+            "SELECT DISTINCT source FROM docs WHERE source LIKE ?", (f"%{source}%",)
+        )
+        matches = [row[0] for row in cursor]
+
+        if not matches:
+            click.echo(f"No sources matching '{source}'", err=True)
+            return
+
+        if len(matches) > 1:
+            click.echo(f"Multiple matches for '{source}':")
+            for m in matches:
+                click.echo(f"  {m}")
+            click.echo("Be more specific.", err=True)
+            return
+
+        source_path = matches[0]
+        deleted = db.delete_source(source_path)
+        click.echo(f"Deleted {deleted} chunks from {source_path}")
+    finally:
         db.close()
+
+
+@cli.command("list")
+@click.option("--json", "output_json", is_flag=True, help="Output as JSON")
+@click.pass_context
+def list_sources(ctx: click.Context, output_json: bool) -> None:
+    """List all indexed sources with chunk counts."""
+    db_path = ctx.obj["db_path"]
+
+    if not Path(db_path).exists():
+        click.echo(f"Database not found: {db_path}", err=True)
         return
 
-    if len(matches) > 1:
-        click.echo(f"Multiple matches for '{source}':")
-        for m in matches:
-            click.echo(f"  {m}")
-        click.echo("Be more specific.", err=True)
+    db = SearchDB(db_path)
+    try:
+        sources = db.list_sources()
+
+        if output_json:
+            click.echo(
+                orjson.dumps(
+                    {"sources": sources, "count": len(sources)}, option=orjson.OPT_INDENT_2
+                ).decode()
+            )
+        else:
+            if not sources:
+                click.echo("No indexed sources.")
+            else:
+                click.echo(f"{'Source':<60} {'Chunks':>6}  {'ID Range':>12}")
+                click.echo("-" * 82)
+                for s in sources:
+                    name = s["source"]
+                    if len(name) > 58:
+                        name = "..." + name[-55:]
+                    click.echo(f"{name:<60} {s['chunks']:>6}  {s['min_id']}-{s['max_id']:>6}")
+                click.echo(f"\nTotal: {len(sources)} source(s)")
+    finally:
         db.close()
-        return
-
-    source_path = matches[0]
-    deleted = db.delete_source(source_path)
-    click.echo(f"Deleted {deleted} chunks from {source_path}")
-
-    db.close()
 
 
 if __name__ == "__main__":
