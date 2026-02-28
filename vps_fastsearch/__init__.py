@@ -1,15 +1,15 @@
 """VPS-FastSearch - Fast memory/vector search for CPU-only VPS."""
 
+from .chunker import chunk_markdown, chunk_text
+from .client import DaemonNotRunningError, FastSearchClient, embed, search
+from .config import FastSearchConfig, create_default_config, load_config
 from .core import Embedder, Reranker, SearchDB, get_embedder, get_reranker
-from .chunker import chunk_text, chunk_markdown
-from .client import FastSearchClient, DaemonNotRunningError, search, embed
-from .config import FastSearchConfig, load_config, create_default_config
 
 __version__ = "0.3.0"
 __all__ = [
     # Core classes
     "Embedder",
-    "Reranker", 
+    "Reranker",
     "SearchDB",
     "get_embedder",
     "get_reranker",

@@ -7,14 +7,14 @@ import threading
 from pathlib import Path
 from typing import Any
 
+import apsw
+import orjson
+import sqlite_vec
+
 logger = logging.getLogger(__name__)
 
 # Schema version for migration tracking (via PRAGMA user_version)
 SCHEMA_VERSION = 1
-
-import apsw
-import orjson
-import sqlite_vec
 
 # Lazy import fastembed to speed up CLI startup
 _embedder_instance = None
@@ -64,13 +64,13 @@ class Embedder:
                     time.sleep(wait)
                 else:
                     raise
-    
+
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a list of texts."""
         # fastembed returns a generator, convert to list
         embeddings = list(self._model.embed(texts))
         return [emb.tolist() for emb in embeddings]
-    
+
     def embed_single(self, text: str) -> list[float]:
         """Generate embedding for a single text."""
         return self.embed([text])[0]
@@ -131,46 +131,46 @@ class Reranker:
                     time.sleep(wait)
                 else:
                     raise
-    
+
     def rerank(self, query: str, documents: list[str]) -> list[float]:
         """
         Score documents against query using cross-encoder.
-        
+
         Returns list of relevance scores (higher = more relevant).
         """
         if not documents:
             return []
-        
+
         # Cross-encoder expects pairs of (query, document)
         pairs = [[query, doc] for doc in documents]
         scores = self._model.predict(pairs)
-        
+
         # Convert numpy array to list of floats
         return list(scores.tolist())
-    
+
     def rerank_with_indices(
         self, query: str, documents: list[str], top_k: int | None = None
     ) -> list[tuple[int, float]]:
         """
         Rerank documents and return sorted (index, score) pairs.
-        
+
         Args:
             query: Search query
             documents: List of document texts
             top_k: Optional limit on results
-            
+
         Returns:
             List of (original_index, score) sorted by score descending
         """
         scores = self.rerank(query, documents)
-        
+
         # Pair indices with scores and sort
         indexed_scores = list(enumerate(scores))
         indexed_scores.sort(key=lambda x: x[1], reverse=True)
-        
+
         if top_k is not None:
             indexed_scores = indexed_scores[:top_k]
-        
+
         return indexed_scores
 
 
@@ -182,13 +182,13 @@ def get_reranker() -> Reranker:
 class SearchDB:
     """
     SQLite database with FTS5 (BM25) and sqlite-vec (vector) search.
-    
+
     Provides:
     - BM25 full-text search via FTS5
     - Vector similarity search via sqlite-vec
     - Hybrid search using RRF (Reciprocal Rank Fusion)
     """
-    
+
     EMBEDDING_DIM = 768
     MAX_SEARCH_LIMIT = 10000
 
@@ -199,7 +199,7 @@ class SearchDB:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = apsw.Connection(str(self.db_path))
-        
+
         # Load sqlite-vec extension
         self.conn.enableloadextension(True)
         self.conn.loadextension(sqlite_vec.loadable_path())
@@ -223,11 +223,11 @@ class SearchDB:
             raise
 
         self._init_schema()
-    
+
     def _execute(self, sql: str, params: tuple[Any, ...] = ()) -> apsw.Cursor:
         """Execute SQL and return cursor."""
         return self.conn.execute(sql, params)
-    
+
     def _init_schema(self) -> None:
         """Initialize database schema."""
         # Main docs table
@@ -241,9 +241,9 @@ class SearchDB:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
+
         self._execute("CREATE INDEX IF NOT EXISTS idx_docs_source ON docs(source)")
-        
+
         self._execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_docs_source_chunk "
             "ON docs(source, chunk_index)"
@@ -258,27 +258,27 @@ class SearchDB:
                 tokenize='porter unicode61'
             )
         """)
-        
+
         # Triggers to keep FTS in sync
         self._execute("""
             CREATE TRIGGER IF NOT EXISTS docs_ai AFTER INSERT ON docs BEGIN
                 INSERT INTO docs_fts(rowid, content) VALUES (new.id, new.content);
             END
         """)
-        
+
         self._execute("""
             CREATE TRIGGER IF NOT EXISTS docs_ad AFTER DELETE ON docs BEGIN
                 INSERT INTO docs_fts(docs_fts, rowid, content) VALUES('delete', old.id, old.content);
             END
         """)
-        
+
         self._execute("""
             CREATE TRIGGER IF NOT EXISTS docs_au AFTER UPDATE ON docs BEGIN
                 INSERT INTO docs_fts(docs_fts, rowid, content) VALUES('delete', old.id, old.content);
                 INSERT INTO docs_fts(docs_fts, rowid, content) VALUES (new.id, new.content);
             END
         """)
-        
+
         # Vector virtual table
         self._execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS docs_vec USING vec0(
@@ -309,7 +309,7 @@ class SearchDB:
                 f"Updating database schema version from {current_version} to {SCHEMA_VERSION}"
             )
             self._execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-    
+
     def index_document(
         self,
         source: str,
@@ -364,7 +364,7 @@ class SearchDB:
     ) -> list[int]:
         """
         Batch index multiple document chunks.
-        
+
         Each item is (source, chunk_index, content, embedding, metadata).
         Returns list of document IDs.
         """
@@ -406,7 +406,7 @@ class SearchDB:
             raise
 
         return doc_ids
-    
+
     def search_bm25(
         self,
         query: str,
@@ -447,7 +447,7 @@ class SearchDB:
             """,
             (fts_query, limit),
         )
-        
+
         results = []
         for rank, row in enumerate(cursor, 1):
             doc_id, source, chunk_index, content, metadata, score = row
@@ -460,9 +460,9 @@ class SearchDB:
                 "score": score,
                 "rank": rank,
             })
-        
+
         return results
-    
+
     def search_vector(
         self,
         embedding: list[float],
@@ -470,7 +470,7 @@ class SearchDB:
     ) -> list[dict[str, Any]]:
         """
         Vector similarity search using cosine distance.
-        
+
         Returns list of results with id, source, content, distance, rank.
         """
         if limit < 0:
@@ -485,7 +485,7 @@ class SearchDB:
             )
         cursor = self._execute(
             """
-            SELECT 
+            SELECT
                 v.id,
                 v.distance,
                 d.source,
@@ -500,7 +500,7 @@ class SearchDB:
             """,
             (sqlite_vec.serialize_float32(embedding), limit),
         )
-        
+
         results = []
         for rank, row in enumerate(cursor, 1):
             doc_id, distance, source, chunk_index, content, metadata = row
@@ -513,9 +513,9 @@ class SearchDB:
                 "distance": distance,
                 "rank": rank,
             })
-        
+
         return results
-    
+
     def search_hybrid(
         self,
         query: str,
@@ -527,9 +527,9 @@ class SearchDB:
     ) -> list[dict[str, Any]]:
         """
         Hybrid search combining BM25 and vector search using RRF.
-        
+
         RRF score = weight_bm25 * 1/(k + bm25_rank) + weight_vec * 1/(k + vec_rank)
-        
+
         Returns list of results sorted by RRF score (descending).
         """
         if limit < 0:
@@ -548,48 +548,48 @@ class SearchDB:
         tokens = re.findall(r"\w+", query)
         bm25_results = self.search_bm25(query, limit=fetch_limit) if tokens else []
         vec_results = self.search_vector(embedding, limit=fetch_limit)
-        
+
         # Build rank maps
         bm25_ranks = {r["id"]: r["rank"] for r in bm25_results}
         vec_ranks = {r["id"]: r["rank"] for r in vec_results}
-        
+
         # Collect all unique document IDs
         all_ids = set(bm25_ranks.keys()) | set(vec_ranks.keys())
-        
+
         # Build result lookup
         result_lookup = {}
         for r in bm25_results + vec_results:
             if r["id"] not in result_lookup:
                 result_lookup[r["id"]] = r
-        
+
         # Calculate RRF scores
         rrf_results = []
         default_rank = fetch_limit + 1  # Penalty for not appearing in a list
-        
+
         for doc_id in all_ids:
             bm25_rank = bm25_ranks.get(doc_id, default_rank)
             vec_rank = vec_ranks.get(doc_id, default_rank)
-            
+
             rrf_score = (
                 bm25_weight * (1 / (k + bm25_rank)) +
                 vec_weight * (1 / (k + vec_rank))
             )
-            
+
             result = result_lookup[doc_id].copy()
             result["rrf_score"] = rrf_score
             result["bm25_rank"] = bm25_rank if doc_id in bm25_ranks else None
             result["vec_rank"] = vec_rank if doc_id in vec_ranks else None
             rrf_results.append(result)
-        
+
         # Sort by RRF score descending
         rrf_results.sort(key=lambda x: (-x["rrf_score"], x["id"]))
-        
+
         # Assign final ranks
         for i, r in enumerate(rrf_results[:limit], 1):
             r["rank"] = i
-        
+
         return rrf_results[:limit]
-    
+
     def search_hybrid_reranked(
         self,
         query: str,
@@ -600,18 +600,18 @@ class SearchDB:
     ) -> list[dict[str, Any]]:
         """
         Hybrid search with cross-encoder reranking.
-        
+
         1. Get top rerank_top_k candidates from hybrid search (fast)
         2. Rerank candidates with cross-encoder (accurate)
         3. Return top limit results
-        
+
         Args:
             query: Search query text
             embedding: Query embedding vector
             limit: Final number of results to return
             rerank_top_k: Number of candidates to fetch for reranking
             reranker: Optional Reranker instance (uses singleton if None)
-            
+
         Returns:
             List of results sorted by reranker score (descending).
         """
@@ -623,27 +623,27 @@ class SearchDB:
 
         # Get candidates from hybrid search
         candidates = self.search_hybrid(query, embedding, limit=rerank_top_k)
-        
+
         if not candidates:
             return []
-        
+
         # Get or create reranker
         if reranker is None:
             reranker = get_reranker()
-        
+
         # Extract document contents for reranking
         doc_contents = [c["content"] for c in candidates]
-        
+
         # Rerank with cross-encoder
         rerank_scores = reranker.rerank(query, doc_contents)
-        
+
         # Attach scores to candidates
         for candidate, score in zip(candidates, rerank_scores, strict=True):
             candidate["rerank_score"] = score
-        
+
         # Sort by reranker score (descending)
         candidates.sort(key=lambda x: x["rerank_score"], reverse=True)
-        
+
         # Assign final ranks and return top limit
         for i, r in enumerate(candidates[:limit], 1):
             r["rank"] = i
@@ -682,22 +682,22 @@ class SearchDB:
                 raise
 
         return int(count)
-    
+
     def get_stats(self) -> dict[str, Any]:
         """Get database statistics."""
         doc_count = list(self._execute("SELECT COUNT(*) FROM docs"))[0][0]
         source_count = list(self._execute("SELECT COUNT(DISTINCT source) FROM docs"))[0][0]
-        
+
         top_sources = [
             {"source": row[0], "chunks": row[1]}
             for row in self._execute(
                 "SELECT source, COUNT(*) as chunks FROM docs GROUP BY source ORDER BY chunks DESC LIMIT 10"
             )
         ]
-        
+
         # Database file size
         db_size = self.db_path.stat().st_size if self.db_path.exists() else 0
-        
+
         return {
             "total_chunks": doc_count,
             "total_sources": source_count,
@@ -705,7 +705,7 @@ class SearchDB:
             "db_size_bytes": db_size,
             "db_size_mb": round(db_size / (1024 * 1024), 2),
         }
-    
+
     def close(self) -> None:
         """Close database connection."""
         self.conn.close()

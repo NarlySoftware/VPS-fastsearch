@@ -1,6 +1,6 @@
 """Tests for vps_fastsearch.chunker — no ML models required."""
 
-from vps_fastsearch.chunker import chunk_text, chunk_markdown, estimate_tokens
+from vps_fastsearch.chunker import chunk_markdown, chunk_text, estimate_tokens
 
 
 def test_chunk_text_multiple_paragraphs():
@@ -37,7 +37,7 @@ def test_chunk_markdown_section_metadata():
 
     assert len(results) >= 1
     # Each result is (chunk_text, metadata)
-    for chunk_text_str, metadata in results:
+    for _chunk_text_str, metadata in results:
         assert "section" in metadata
         assert isinstance(metadata["section"], str)
 

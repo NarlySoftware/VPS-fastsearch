@@ -9,9 +9,7 @@ Usage:
 """
 
 import json
-import os
 import random
-import string
 import subprocess
 import sys
 import tempfile
@@ -174,7 +172,6 @@ def main() -> None:
     db_path = Path.home() / ".local/share/fastsearch/fastsearch.db"
     if db_path.exists():
         # Use the CLI delete for each source prefix
-        import glob as glob_mod
         # Just delete all sources by finding them
         try:
             import apsw

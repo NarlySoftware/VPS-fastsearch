@@ -11,11 +11,11 @@ import signal
 import socket
 import sys
 import time
-import traceback
 from collections import OrderedDict, deque
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .core import SearchDB
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 import orjson
 import psutil
 
-from .config import DEFAULT_DB_PATH, FastSearchConfig, load_config, ModelConfig
+from .config import DEFAULT_DB_PATH, FastSearchConfig, load_config
 
 # Configure logging
 logger = logging.getLogger("vps_fastsearch.daemon")
@@ -67,24 +67,24 @@ class _RerankerAdapter:
 class ModelManager:
     """
     Manages model lifecycle with memory budgets and LRU eviction.
-    
+
     Model slots:
     - embedder: BAAI/bge-base-en-v1.5 (always loaded by default)
     - reranker: cross-encoder/ms-marco-MiniLM (on-demand)
     - summarizer: (future) 7B models
     """
-    
+
     def __init__(self, config: FastSearchConfig) -> None:
         self.config = config
         self._models: OrderedDict[str, LoadedModel] = OrderedDict()
         self._load_lock = asyncio.Lock()
         self._unload_tasks: dict[str, asyncio.Task[None]] = {}
-    
+
     def get_memory_usage(self) -> float:
         """Get current process memory usage in MB."""
         process = psutil.Process()
         return float(process.memory_info().rss) / (1024 * 1024)
-    
+
     def estimate_model_memory(self, slot: str) -> float:
         """Estimate memory for a model slot (MB)."""
         estimates = {
@@ -93,7 +93,7 @@ class ModelManager:
             "summarizer": 4000, # 7B model (future)
         }
         return estimates.get(slot, 500)
-    
+
     def _load_model_sync(self, slot: str) -> tuple[Any, float]:
         """Synchronously load a model (run in executor).
 
@@ -140,7 +140,7 @@ class ModelManager:
         logger.info(f"Loaded {slot} in {elapsed:.2f}s")
 
         return instance, actual_memory_mb
-    
+
     async def load_model(self, slot: str) -> LoadedModel:
         """Load a model into memory."""
         async with self._load_lock:
@@ -198,29 +198,29 @@ class ModelManager:
             if slot in self._models:
                 model = self._models[slot]
                 model.ref_count = max(0, model.ref_count - 1)
-    
+
     async def _ensure_memory_budget(self, slot: str) -> None:
         """Evict models if needed to fit new model."""
         needed_mb = self.estimate_model_memory(slot)
         max_ram = self.config.memory.max_ram_mb
-        
+
         current_usage = self.get_memory_usage()
-        
+
         # Keep evicting until we have room
         while current_usage + needed_mb > max_ram and self._models:
             # Find eviction candidate (LRU, excluding "always" models)
             evict_slot = None
-            
+
             for s in self._models:
                 model_config = self.config.models.get(s)
                 if model_config and model_config.keep_loaded != "always":
                     evict_slot = s
                     break
-            
+
             if evict_slot is None:
-                logger.warning(f"Cannot evict: all models are 'always' loaded")
+                logger.warning("Cannot evict: all models are 'always' loaded")
                 break
-            
+
             await self.unload_model(evict_slot)
             # If model wasn't actually unloaded (ref_count > 0), stop trying
             if evict_slot in self._models:
@@ -229,7 +229,7 @@ class ModelManager:
                 )
                 break
             current_usage = self.get_memory_usage()
-    
+
     async def unload_model(self, slot: str) -> None:
         """Unload a model from memory."""
         if slot not in self._models:
@@ -249,34 +249,34 @@ class ModelManager:
         if model_config and model_config.keep_loaded == "always":
             logger.warning(f"Cannot unload 'always' model: {slot}")
             return
-        
+
         logger.info(f"Unloading model: {slot}")
-        
+
         # Remove from tracking
         del self._models[slot]
-        
+
         # Delete instance to free memory
         del model.instance
-        
+
         # Force garbage collection
         import gc
         gc.collect()
-        
+
         logger.info(f"Model {slot} unloaded. Memory: {self.get_memory_usage():.0f}MB")
-    
+
     def _schedule_unload(self, slot: str) -> None:
         """Schedule auto-unload for on-demand models."""
         model_config = self.config.models.get(slot)
         if not model_config:
             return
-        
+
         if model_config.keep_loaded != "on_demand":
             return
-        
+
         timeout = model_config.idle_timeout_seconds
         if timeout <= 0:
             return
-        
+
         async def _delayed_unload() -> None:
             await asyncio.sleep(timeout)
             if slot in self._models:
@@ -284,21 +284,21 @@ class ModelManager:
                 idle_time = time.time() - model.last_used
                 if idle_time >= timeout:
                     await self.unload_model(slot)
-        
+
         # Cancel existing task
         if slot in self._unload_tasks:
             self._unload_tasks[slot].cancel()
-        
+
         self._unload_tasks[slot] = asyncio.create_task(_delayed_unload())
-    
+
     def get_model(self, slot: str) -> LoadedModel | None:
         """Get a loaded model without loading it."""
         return self._models.get(slot)
-    
+
     def is_loaded(self, slot: str) -> bool:
         """Check if a model is loaded."""
         return slot in self._models
-    
+
     def get_status(self) -> dict[str, Any]:
         """Get current model status."""
         return {
@@ -315,21 +315,21 @@ class ModelManager:
             "total_memory_mb": self.get_memory_usage(),
             "max_memory_mb": self.config.memory.max_ram_mb,
         }
-    
+
     async def shutdown(self) -> None:
         """Shutdown and unload all models."""
         # Cancel all unload tasks
         for task in self._unload_tasks.values():
             task.cancel()
         self._unload_tasks.clear()
-        
+
         # Unload all models (even "always" ones)
         slots = list(self._models.keys())
         for slot in slots:
             if slot in self._models:
                 model = self._models.pop(slot)
                 del model.instance
-        
+
         import gc
         gc.collect()
 
@@ -356,10 +356,10 @@ class RateLimiter:
 class FastSearchDaemon:
     """
     Unix socket server for FastSearch operations.
-    
+
     JSON-RPC 2.0 protocol for requests/responses.
     """
-    
+
     def __init__(self, config: FastSearchConfig | None = None) -> None:
         self.config = config or load_config()
         self.model_manager = ModelManager(self.config)
@@ -367,7 +367,7 @@ class FastSearchDaemon:
         self._start_time: float | None = None
         self._request_count = 0
         self._shutdown_event = asyncio.Event()
-        self._db_cache: dict[str, "SearchDB"] = {}
+        self._db_cache: dict[str, SearchDB] = {}
         self._concurrent_sem = asyncio.Semaphore(64)
 
         # Handler registry
@@ -382,15 +382,15 @@ class FastSearchDaemon:
             "reload_config": self._handle_reload_config,
             "shutdown": self._handle_shutdown,
         }
-    
+
     async def _handle_ping(self, params: dict[str, Any]) -> dict[str, Any]:
         """Simple ping handler."""
         return {"pong": True, "timestamp": time.time()}
-    
+
     async def _handle_status(self, params: dict[str, Any]) -> dict[str, Any]:
         """Get daemon status."""
         model_status = self.model_manager.get_status()
-        
+
         return {
             "uptime_seconds": time.time() - self._start_time if self._start_time else 0,
             "request_count": self._request_count,
@@ -398,10 +398,10 @@ class FastSearchDaemon:
             "concurrent_slots_available": self._concurrent_sem._value,
             **model_status,
         }
-    
+
     _DB_CACHE_MAX: int = 8
 
-    def _get_db(self, db_path: str) -> "SearchDB":
+    def _get_db(self, db_path: str) -> SearchDB:
         """Get or create a cached SearchDB connection.
 
         Validates that db_path resolves to a location under the allowed base
@@ -501,7 +501,7 @@ class FastSearchDaemon:
             await self.model_manager.release_model("embedder")
             if reranker_model is not None:
                 await self.model_manager.release_model("reranker")
-    
+
     async def _handle_embed(self, params: dict[str, Any]) -> dict[str, Any]:
         """Generate embeddings for texts."""
         texts = params.get("texts", [])
@@ -526,7 +526,7 @@ class FastSearchDaemon:
             }
         finally:
             await self.model_manager.release_model("embedder")
-    
+
     async def _handle_rerank(self, params: dict[str, Any]) -> dict[str, Any]:
         """Rerank documents against query."""
         query = params.get("query")
@@ -567,7 +567,7 @@ class FastSearchDaemon:
             }
         finally:
             await self.model_manager.release_model("reranker")
-    
+
     async def _handle_load_model(self, params: dict[str, Any]) -> dict[str, Any]:
         """Load a model slot."""
         slot = params.get("slot")
@@ -583,20 +583,20 @@ class FastSearchDaemon:
             "loaded": True,
             "memory_mb": model.memory_mb,
         }
-    
+
     async def _handle_unload_model(self, params: dict[str, Any]) -> dict[str, Any]:
         """Unload a model slot."""
         slot = params.get("slot")
         if not slot:
             raise ValueError("Missing 'slot' parameter")
-        
+
         await self.model_manager.unload_model(slot)
-        
+
         return {
             "slot": slot,
             "unloaded": True,
         }
-    
+
     async def _handle_reload_config(self, params: dict[str, Any]) -> dict[str, Any]:
         """Reload configuration."""
         config_path = params.get("config_path")
@@ -621,12 +621,12 @@ class FastSearchDaemon:
             "reloaded": True,
             "socket_path": new_config.daemon.socket_path,
         }
-    
+
     async def _handle_shutdown(self, params: dict[str, Any]) -> dict[str, Any]:
         """Shutdown the daemon."""
         self._shutdown_event.set()
         return {"shutdown": True}
-    
+
     async def _handle_request(self, data: bytes) -> bytes:
         """Process a JSON-RPC request."""
         try:
@@ -669,7 +669,7 @@ class FastSearchDaemon:
                 "error": {"code": -32601, "message": f"Method not found: {method}"},
                 "id": request_id,
             })
-        
+
         try:
             result = await self._handlers[method](params)
             return orjson.dumps({
@@ -692,7 +692,7 @@ class FastSearchDaemon:
                 "error": {"code": -32000, "message": f"Internal error: {error_type}"},
                 "id": request_id,
             })
-    
+
     async def _handle_client(
         self,
         reader: asyncio.StreamReader,
@@ -757,14 +757,14 @@ class FastSearchDaemon:
 
         except asyncio.IncompleteReadError:
             pass  # Client disconnected
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.info("Client connection timed out")
-        except Exception as e:
+        except Exception:
             logger.exception("Error handling client")
         finally:
             writer.close()
             await writer.wait_closed()
-    
+
     async def start(self, foreground: bool = True) -> None:
         """Start the daemon server."""
         socket_path = self.config.daemon.socket_path
@@ -817,9 +817,9 @@ class FastSearchDaemon:
             )
         finally:
             os.umask(old_umask)
-        
+
         self._start_time = time.time()
-        
+
         # Write PID file
         # Remove any existing PID file first (don't follow symlinks)
         try:
@@ -832,9 +832,9 @@ class FastSearchDaemon:
             os.write(fd, str(os.getpid()).encode())
         finally:
             os.close(fd)
-        
+
         logger.info(f"VPS-FastSearch daemon started on {socket_path}")
-        
+
         # Pre-load "always" models (fail fast if required models can't load)
         for slot, model_config in self.config.models.items():
             if model_config.keep_loaded == "always":
@@ -847,22 +847,22 @@ class FastSearchDaemon:
                     raise RuntimeError(
                         f"Cannot start daemon: required model '{slot}' failed to load"
                     ) from e
-        
+
         if foreground:
             try:
                 # Wait for shutdown signal
                 await self._shutdown_event.wait()
             finally:
                 await self.stop()
-    
+
     async def stop(self) -> None:
         """Stop the daemon server."""
         logger.info("Shutting down VPS-FastSearch daemon...")
-        
+
         if self._server:
             self._server.close()
             await self._server.wait_closed()
-        
+
         await self.model_manager.shutdown()
 
         # Checkpoint and close cached database connections
@@ -882,11 +882,11 @@ class FastSearchDaemon:
         socket_path = self.config.daemon.socket_path
         if os.path.exists(socket_path):
             os.unlink(socket_path)
-        
+
         pid_path = self.config.daemon.pid_path
         if os.path.exists(pid_path):
             os.unlink(pid_path)
-        
+
         logger.info("VPS-FastSearch daemon stopped")
 
 
@@ -899,7 +899,7 @@ def run_daemon(config_path: str | None = None, foreground: bool = True, detach: 
         level=getattr(logging, config.daemon.log_level.upper(), logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    
+
     if detach:
         # Double-fork daemonization (Unix standard technique).
         # A pipe communicates the final daemon PID back to the original parent.
@@ -970,7 +970,7 @@ def run_daemon(config_path: str | None = None, foreground: bool = True, detach: 
         os.dup2(devnull, 2)
         if devnull > 2:
             os.close(devnull)
-    
+
     daemon = FastSearchDaemon(config)
 
     # Register atexit handler to checkpoint/close DBs on non-SIGKILL exits
@@ -987,7 +987,7 @@ def run_daemon(config_path: str | None = None, foreground: bool = True, detach: 
     # Handle signals
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
+
     def signal_handler() -> None:
         daemon._shutdown_event.set()
 
@@ -998,7 +998,7 @@ def run_daemon(config_path: str | None = None, foreground: bool = True, detach: 
     loop.add_signal_handler(signal.SIGTERM, signal_handler)
     loop.add_signal_handler(signal.SIGINT, signal_handler)
     loop.add_signal_handler(signal.SIGHUP, sighup_handler)
-    
+
     try:
         loop.run_until_complete(daemon.start(foreground=True))
     finally:
@@ -1009,14 +1009,14 @@ def stop_daemon(config_path: str | None = None) -> bool:
     """Stop the running daemon."""
     config = load_config(config_path)
     pid_path = config.daemon.pid_path
-    
+
     if not os.path.exists(pid_path):
         return False
-    
+
     try:
         pid = int(Path(pid_path).read_text().strip())
         os.kill(pid, signal.SIGTERM)
-        
+
         # Wait for process to exit
         for _ in range(50):  # 5 seconds
             try:
@@ -1048,10 +1048,10 @@ def get_daemon_status(config_path: str | None = None) -> dict[str, Any] | None:
     """Get status of running daemon."""
     config = load_config(config_path)
     socket_path = config.daemon.socket_path
-    
+
     if not os.path.exists(socket_path):
         return None
-    
+
     # Try to connect and get status
     sock = None
     try:

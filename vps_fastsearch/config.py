@@ -64,7 +64,7 @@ class FastSearchConfig:
     daemon: DaemonConfig = field(default_factory=DaemonConfig)
     models: dict[str, ModelConfig] = field(default_factory=dict)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
-    
+
     @classmethod
     def default(cls) -> "FastSearchConfig":
         """Create configuration with sensible defaults."""
@@ -84,7 +84,7 @@ class FastSearchConfig:
             },
             memory=MemoryConfig(),
         )
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "FastSearchConfig":
         """Create configuration from dictionary."""
@@ -100,7 +100,7 @@ class FastSearchConfig:
             pid_path=pid_path,
             log_level=log_level,
         )
-        
+
         models = {}
         for name, model_data in data.get("models", {}).items():
             if isinstance(model_data, dict):
@@ -137,19 +137,19 @@ class FastSearchConfig:
             max_ram_mb=int(max_ram),
             eviction_policy=eviction_policy,
         )
-        
+
         return cls(daemon=daemon, models=models, memory=memory)
-    
+
     @classmethod
     def from_yaml(cls, path: Path | str) -> "FastSearchConfig":
         """Load configuration from YAML file."""
         path = Path(path)
-        
+
         if not path.exists():
             return cls.default()
-        
+
         content = path.read_text()
-        
+
         if HAS_YAML:
             try:
                 data = yaml.safe_load(content)
@@ -161,19 +161,19 @@ class FastSearchConfig:
         else:
             # Simple fallback parser for basic YAML
             data = _simple_yaml_parse(content)
-        
+
         # Merge with defaults
         config = cls.default()
         loaded = cls.from_dict(data)
-        
+
         # Override defaults with loaded values
         config.daemon = loaded.daemon
         if loaded.models:
             config.models.update(loaded.models)
         config.memory = loaded.memory
-        
+
         return config
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert configuration to dictionary."""
         return {
@@ -196,7 +196,7 @@ class FastSearchConfig:
                 "eviction_policy": self.memory.eviction_policy,
             },
         }
-    
+
     def to_yaml(self) -> str:
         """Convert configuration to YAML string."""
         if HAS_YAML:
@@ -211,22 +211,20 @@ def _simple_yaml_parse(content: str) -> dict[str, Any]:
     result: dict[str, Any] = {}
     current_section: dict[str, Any] | None = None
     current_subsection: dict[str, Any] | None = None
-    section_name = ""
-    subsection_name = ""
-    
+
     for line in content.split("\n"):
         stripped = line.rstrip()
         if not stripped or stripped.startswith("#"):
             continue
-        
+
         # Count indentation
         indent = len(line) - len(line.lstrip())
-        
+
         if ":" in stripped:
             key, _, value = stripped.partition(":")
             key = key.strip()
             value = value.strip().strip('"\'')
-            
+
             if indent == 0:
                 # Top-level key
                 if value:
@@ -234,7 +232,6 @@ def _simple_yaml_parse(content: str) -> dict[str, Any]:
                 else:
                     result[key] = {}
                     current_section = result[key]
-                    section_name = key
                     current_subsection = None
             elif indent == 2 and current_section is not None:
                 # Second level
@@ -243,11 +240,10 @@ def _simple_yaml_parse(content: str) -> dict[str, Any]:
                 else:
                     current_section[key] = {}
                     current_subsection = current_section[key]
-                    subsection_name = key
             elif indent == 4 and current_subsection is not None:
                 # Third level
                 current_subsection[key] = _parse_value(value)
-    
+
     return result
 
 
@@ -271,21 +267,21 @@ def _simple_yaml_dump(data: dict[str, Any], indent: int = 0) -> str:
     """Simple YAML dumper."""
     lines = []
     prefix = "  " * indent
-    
+
     for key, value in data.items():
         if isinstance(value, dict):
             lines.append(f"{prefix}{key}:")
             lines.append(_simple_yaml_dump(value, indent + 1))
         else:
             lines.append(f"{prefix}{key}: {value}")
-    
+
     return "\n".join(lines)
 
 
 def load_config(path: Path | str | None = None) -> FastSearchConfig:
     """
     Load configuration from file or environment.
-    
+
     Priority:
     1. Explicit path argument
     2. FASTSEARCH_CONFIG environment variable
@@ -296,14 +292,14 @@ def load_config(path: Path | str | None = None) -> FastSearchConfig:
         if not Path(path).exists():
             raise FileNotFoundError(f"Config file not found: {path}")
         return FastSearchConfig.from_yaml(path)
-    
+
     env_path = os.environ.get("FASTSEARCH_CONFIG")
     if env_path:
         return FastSearchConfig.from_yaml(env_path)
-    
+
     if DEFAULT_CONFIG_PATH.exists():
         return FastSearchConfig.from_yaml(DEFAULT_CONFIG_PATH)
-    
+
     return FastSearchConfig.default()
 
 
@@ -311,8 +307,8 @@ def create_default_config(path: Path | str | None = None) -> Path:
     """Create default configuration file."""
     path = Path(path) if path else DEFAULT_CONFIG_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     config = FastSearchConfig.default()
     path.write_text(config.to_yaml())
-    
+
     return path
