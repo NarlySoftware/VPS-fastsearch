@@ -1,7 +1,7 @@
 """Text chunking with overlap for context continuity."""
 
 import re
-from typing import Iterator
+from typing import Any, Iterator
 
 # Approximate tokens per character (conservative estimate for English)
 CHARS_PER_TOKEN = 4
@@ -132,7 +132,7 @@ def chunk_markdown(
     text: str,
     target_chars: int = TARGET_CHARS,
     overlap_chars: int = OVERLAP_CHARS,
-) -> Iterator[tuple[str, dict]]:
+) -> Iterator[tuple[str, dict[str, Any]]]:
     """
     Chunk markdown with section awareness.
     

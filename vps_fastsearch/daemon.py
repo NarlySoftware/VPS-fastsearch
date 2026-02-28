@@ -15,7 +15,7 @@ import traceback
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 if TYPE_CHECKING:
     from .core import SearchDB
@@ -78,7 +78,7 @@ class ModelManager:
         self.config = config
         self._models: OrderedDict[str, LoadedModel] = OrderedDict()
         self._load_lock = asyncio.Lock()
-        self._unload_tasks: dict[str, asyncio.Task] = {}
+        self._unload_tasks: dict[str, asyncio.Task[None]] = {}
     
     def get_memory_usage(self) -> float:
         """Get current process memory usage in MB."""
@@ -371,7 +371,7 @@ class FastSearchDaemon:
         self._concurrent_sem = asyncio.Semaphore(64)
 
         # Handler registry
-        self._handlers: dict[str, Callable] = {
+        self._handlers: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
             "ping": self._handle_ping,
             "status": self._handle_status,
             "search": self._handle_search,
@@ -383,11 +383,11 @@ class FastSearchDaemon:
             "shutdown": self._handle_shutdown,
         }
     
-    async def _handle_ping(self, params: dict) -> dict:
+    async def _handle_ping(self, params: dict[str, Any]) -> dict[str, Any]:
         """Simple ping handler."""
         return {"pong": True, "timestamp": time.time()}
     
-    async def _handle_status(self, params: dict) -> dict:
+    async def _handle_status(self, params: dict[str, Any]) -> dict[str, Any]:
         """Get daemon status."""
         model_status = self.model_manager.get_status()
         
@@ -434,7 +434,7 @@ class FastSearchDaemon:
             self._db_cache[key] = SearchDB(str(resolved))
         return self._db_cache[key]
 
-    async def _handle_search(self, params: dict) -> dict:
+    async def _handle_search(self, params: dict[str, Any]) -> dict[str, Any]:
         """Handle search request."""
         query = params.get("query")
         if not isinstance(query, str) or not query:
@@ -502,7 +502,7 @@ class FastSearchDaemon:
             if reranker_model is not None:
                 await self.model_manager.release_model("reranker")
     
-    async def _handle_embed(self, params: dict) -> dict:
+    async def _handle_embed(self, params: dict[str, Any]) -> dict[str, Any]:
         """Generate embeddings for texts."""
         texts = params.get("texts", [])
         if not texts:
@@ -527,7 +527,7 @@ class FastSearchDaemon:
         finally:
             await self.model_manager.release_model("embedder")
     
-    async def _handle_rerank(self, params: dict) -> dict:
+    async def _handle_rerank(self, params: dict[str, Any]) -> dict[str, Any]:
         """Rerank documents against query."""
         query = params.get("query")
         documents = params.get("documents", [])
@@ -568,7 +568,7 @@ class FastSearchDaemon:
         finally:
             await self.model_manager.release_model("reranker")
     
-    async def _handle_load_model(self, params: dict) -> dict:
+    async def _handle_load_model(self, params: dict[str, Any]) -> dict[str, Any]:
         """Load a model slot."""
         slot = params.get("slot")
         if not slot:
@@ -584,7 +584,7 @@ class FastSearchDaemon:
             "memory_mb": model.memory_mb,
         }
     
-    async def _handle_unload_model(self, params: dict) -> dict:
+    async def _handle_unload_model(self, params: dict[str, Any]) -> dict[str, Any]:
         """Unload a model slot."""
         slot = params.get("slot")
         if not slot:
@@ -597,7 +597,7 @@ class FastSearchDaemon:
             "unloaded": True,
         }
     
-    async def _handle_reload_config(self, params: dict) -> dict:
+    async def _handle_reload_config(self, params: dict[str, Any]) -> dict[str, Any]:
         """Reload configuration."""
         config_path = params.get("config_path")
 
@@ -622,7 +622,7 @@ class FastSearchDaemon:
             "socket_path": new_config.daemon.socket_path,
         }
     
-    async def _handle_shutdown(self, params: dict) -> dict:
+    async def _handle_shutdown(self, params: dict[str, Any]) -> dict[str, Any]:
         """Shutdown the daemon."""
         self._shutdown_event.set()
         return {"shutdown": True}
@@ -1044,7 +1044,7 @@ def stop_daemon(config_path: str | None = None) -> bool:
         return False
 
 
-def get_daemon_status(config_path: str | None = None) -> dict | None:
+def get_daemon_status(config_path: str | None = None) -> dict[str, Any] | None:
     """Get status of running daemon."""
     config = load_config(config_path)
     socket_path = config.daemon.socket_path

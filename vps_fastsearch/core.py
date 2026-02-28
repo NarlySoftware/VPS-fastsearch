@@ -224,7 +224,7 @@ class SearchDB:
 
         self._init_schema()
     
-    def _execute(self, sql: str, params: tuple = ()) -> apsw.Cursor:
+    def _execute(self, sql: str, params: tuple[Any, ...] = ()) -> apsw.Cursor:
         """Execute SQL and return cursor."""
         return self.conn.execute(sql, params)
     
@@ -316,11 +316,11 @@ class SearchDB:
         chunk_index: int,
         content: str,
         embedding: list[float],
-        metadata: dict | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> int:
         """
         Index a document chunk with its embedding.
-        
+
         Returns the document ID.
         """
         if len(embedding) != self.EMBEDDING_DIM:
@@ -360,7 +360,7 @@ class SearchDB:
 
     def index_batch(
         self,
-        items: list[tuple[str, int, str, list[float], dict | None]],
+        items: list[tuple[str, int, str, list[float], dict[str, Any] | None]],
     ) -> list[int]:
         """
         Batch index multiple document chunks.

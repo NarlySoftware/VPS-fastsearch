@@ -3,6 +3,7 @@
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import click
 import orjson
@@ -256,7 +257,7 @@ def index(ctx: click.Context, path: str, glob: str, reindex: bool) -> None:
         
         # Index chunks
         t0 = time.perf_counter()
-        items: list[tuple[str, int, str, list[float], dict | None]] = []
+        items: list[tuple[str, int, str, list[float], dict[str, Any] | None]] = []
         for i, ((text, metadata), embedding) in enumerate(zip(chunks, embeddings, strict=True)):
             items.append((source, i, text, embedding, metadata))
         
