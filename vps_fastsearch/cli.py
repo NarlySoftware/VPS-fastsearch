@@ -1,5 +1,6 @@
 """VPS-FastSearch CLI - Index and search documents with optional daemon mode."""
 
+import logging
 import sys
 import time
 from pathlib import Path
@@ -13,6 +14,8 @@ from .chunker import chunk_markdown, chunk_text
 from .client import DaemonNotRunningError, FastSearchClient
 from .config import DEFAULT_CONFIG_PATH, DEFAULT_DB_PATH, create_default_config, load_config
 from .core import Embedder, SearchDB
+
+logger = logging.getLogger(__name__)
 
 
 @click.group()
@@ -212,6 +215,7 @@ def index(ctx: click.Context, path: str, glob: str, reindex: bool, base_dir: str
                 click.echo(f"No files matching '{glob}' in {index_path}", err=True)
                 return
 
+        logger.info("Indexing %d files from %s", len(files), index_path)
         click.echo(f"Indexing {len(files)} file(s)...")
 
         # Try to use daemon for embedding, fall back to direct
@@ -224,7 +228,7 @@ def index(ctx: click.Context, path: str, glob: str, reindex: bool, base_dir: str
                 use_daemon = True
                 click.echo("Using daemon for embedding...")
         except (OSError, ConnectionError, TimeoutError):
-            pass
+            logger.warning("Daemon not available, falling back to direct embedding")
 
         try:
             if not use_daemon:
@@ -295,6 +299,7 @@ def index(ctx: click.Context, path: str, glob: str, reindex: bool, base_dir: str
                     f"(embed: {embed_time:.2f}s, index: {index_time:.3f}s)"
                 )
 
+            logger.info("Indexed %d chunks from %d files", total_chunks, len(files))
             click.echo(f"\nIndexed {total_chunks} chunks in {total_time:.2f}s")
         finally:
             if client:
@@ -304,7 +309,142 @@ def index(ctx: click.Context, path: str, glob: str, reindex: bool, base_dir: str
 
 
 # ============================================================================
-# Search Commands
+# Search Helpers
+# ============================================================================
+
+
+def _parse_metadata_filters(filters: tuple[str, ...]) -> dict[str, Any] | None:
+    """Parse ``--filter key=value`` CLI options into a metadata filter dict.
+
+    Coerces ``true``/``false`` to booleans, numeric strings to ``int`` or
+    ``float``, and leaves everything else as a string.  Returns ``None``
+    when *filters* is empty.
+    """
+    if not filters:
+        return None
+
+    metadata_filter: dict[str, Any] = {}
+    for f in filters:
+        if "=" not in f:
+            click.echo(f"Invalid filter format: '{f}' (expected key=value)", err=True)
+            sys.exit(1)
+        key, value = f.split("=", 1)
+        if not key:
+            click.echo(f"Invalid filter: empty key in '{f}'", err=True)
+            sys.exit(1)
+        # Try to parse numeric/boolean values
+        if value.lower() == "true":
+            metadata_filter[key] = True
+        elif value.lower() == "false":
+            metadata_filter[key] = False
+        else:
+            try:
+                metadata_filter[key] = int(value)
+            except ValueError:
+                try:
+                    metadata_filter[key] = float(value)
+                except ValueError:
+                    metadata_filter[key] = value
+
+    return metadata_filter
+
+
+def _resolve_source_paths(
+    results: list[dict[str, Any]], db_path: str, use_daemon: bool, db: Any
+) -> None:
+    """Resolve relative ``source`` paths to absolute and store as ``source_abs``.
+
+    When *use_daemon* is ``True`` we avoid opening a full ``SearchDB`` (with
+    all its PRAGMAs and schema init) just to read ``base_dir``.  Instead we
+    query the ``db_meta`` table directly with a lightweight apsw connection.
+
+    When *use_daemon* is ``False``, *db* must be a live ``SearchDB`` instance
+    whose ``to_absolute`` method is used.
+
+    Mutates *results* in-place.
+    """
+    if use_daemon:
+        base_dir: Path | None = None
+        if Path(db_path).exists():
+            import apsw
+
+            _conn = apsw.Connection(str(db_path))
+            try:
+                _cur = _conn.execute("SELECT value FROM db_meta WHERE key = 'base_dir'")
+                _row = _cur.fetchone()
+                base_dir = Path(_row[0]) if _row else Path(db_path).parent
+            except apsw.SQLError:
+                # db_meta table may not exist in older schema
+                base_dir = Path(db_path).parent
+            finally:
+                _conn.close()
+
+        if base_dir is not None:
+            for r in results:
+                p = Path(r["source"])
+                r["source_abs"] = str(p) if p.is_absolute() else str((base_dir / p).resolve())
+    else:
+        for r in results:
+            r["source_abs"] = db.to_absolute(r["source"])
+
+
+def _display_results(
+    results: list[dict[str, Any]],
+    query: str,
+    mode: str,
+    rerank: bool,
+    use_daemon: bool,
+    search_time: float,
+    output_json: bool,
+) -> None:
+    """Format and print search results to stdout.
+
+    *search_time* is in seconds (converted to milliseconds for display).
+    When *output_json* is ``True``, emits a single JSON object; otherwise
+    prints a human-readable summary with per-result score details.
+    """
+    if output_json:
+        output: dict[str, Any] = {
+            "query": query,
+            "mode": mode,
+            "reranked": rerank,
+            "daemon": use_daemon,
+            "search_time_ms": round(search_time * 1000, 2),
+            "results": results,
+        }
+        click.echo(orjson.dumps(output, option=orjson.OPT_INDENT_2).decode())
+    else:
+        daemon_info = " [daemon]" if use_daemon else ""
+        rerank_info = " +rerank" if rerank else ""
+        click.echo(
+            f"Search: '{query}' ({mode}{rerank_info}{daemon_info}, {search_time * 1000:.0f}ms)\n"
+        )
+
+        for r in results:
+            source = Path(r["source"]).name
+            preview = r["content"][:200].replace("\n", " ")
+            if len(r["content"]) > 200:
+                preview += "..."
+
+            if rerank and "rerank_score" in r:
+                score_info = f"Rerank: {r['rerank_score']:.4f}"
+            elif mode == "hybrid":
+                score_info = f"RRF: {r['rrf_score']:.4f}"
+                if r.get("bm25_rank"):
+                    score_info += f", BM25 #{r['bm25_rank']}"
+                if r.get("vec_rank"):
+                    score_info += f", Vec #{r['vec_rank']}"
+            elif mode == "bm25":
+                score_info = f"BM25: {r['score']:.2f}"
+            else:
+                score_info = f"Dist: {r['distance']:.4f}"
+
+            click.echo(f"[{r['rank']}] {source} (chunk {r['chunk_index']}) - {score_info}")
+            click.echo(f"    {preview}\n")
+
+
+# ============================================================================
+# Search Command
 # ============================================================================
 
 
@@ -334,34 +474,10 @@ def search(
     filters: tuple[str, ...],
 ) -> None:
     """Search indexed documents."""
+    logger.debug("Search query=%r mode=%s limit=%d", query, mode, limit)
     db_path = ctx.obj["db_path"]
     config_path = ctx.obj.get("config_path")
-
-    # Parse --filter key=value pairs into a dict
-    metadata_filter: dict[str, Any] | None = None
-    if filters:
-        metadata_filter = {}
-        for f in filters:
-            if "=" not in f:
-                click.echo(f"Invalid filter format: '{f}' (expected key=value)", err=True)
-                sys.exit(1)
-            key, value = f.split("=", 1)
-            if not key:
-                click.echo(f"Invalid filter: empty key in '{f}'", err=True)
-                sys.exit(1)
-            # Try to parse numeric/boolean values
-            if value.lower() == "true":
-                metadata_filter[key] = True
-            elif value.lower() == "false":
-                metadata_filter[key] = False
-            else:
-                try:
-                    metadata_filter[key] = int(value)
-                except ValueError:
-                    try:
-                        metadata_filter[key] = float(value)
-                    except ValueError:
-                        metadata_filter[key] = value
+    metadata_filter = _parse_metadata_filters(filters)
 
     # Try daemon first unless --no-daemon
     use_daemon = False
@@ -373,7 +489,7 @@ def search(
             if client.ping():
                 use_daemon = True
         except (OSError, ConnectionError, TimeoutError):
-            pass
+            logger.warning("Daemon not available, falling back to direct search")
 
     t0 = time.perf_counter()
 
@@ -446,74 +562,10 @@ def search(
 
         search_time = time.perf_counter() - t0
 
-        # Resolve relative source paths back to absolute for display.
-        # When using the daemon we avoid opening a full SearchDB (with all its
-        # PRAGMAs and schema init) just to read `base_dir`.  Instead we query
-        # the `db_meta` table directly with a lightweight apsw connection.
-        if use_daemon:
-            base_dir: Path | None = None
-            if Path(db_path).exists():
-                import apsw
-
-                _conn = apsw.Connection(str(db_path))
-                try:
-                    _cur = _conn.execute("SELECT value FROM db_meta WHERE key = 'base_dir'")
-                    _row = _cur.fetchone()
-                    base_dir = Path(_row[0]) if _row else Path(db_path).parent
-                except apsw.SQLError:
-                    # db_meta table may not exist in older schema
-                    base_dir = Path(db_path).parent
-                finally:
-                    _conn.close()
-
-            if base_dir is not None:
-                for r in results:
-                    p = Path(r["source"])
-                    r["source_abs"] = str(p) if p.is_absolute() else str((base_dir / p).resolve())
-        else:
-            for r in results:
-                r["source_abs"] = db.to_absolute(r["source"])
+        _resolve_source_paths(results, db_path, use_daemon, db=None if use_daemon else db)
 
         try:
-            if output_json:
-                output = {
-                    "query": query,
-                    "mode": mode,
-                    "reranked": rerank,
-                    "daemon": use_daemon,
-                    "search_time_ms": round(search_time * 1000, 2),
-                    "results": results,
-                }
-                click.echo(orjson.dumps(output, option=orjson.OPT_INDENT_2).decode())
-            else:
-                daemon_info = " [daemon]" if use_daemon else ""
-                rerank_info = " +rerank" if rerank else ""
-                click.echo(
-                    f"Search: '{query}' ({mode}{rerank_info}{daemon_info},"
-                    f" {search_time * 1000:.0f}ms)\n"
-                )
-
-                for r in results:
-                    source = Path(r["source"]).name
-                    preview = r["content"][:200].replace("\n", " ")
-                    if len(r["content"]) > 200:
-                        preview += "..."
-
-                    if rerank and "rerank_score" in r:
-                        score_info = f"Rerank: {r['rerank_score']:.4f}"
-                    elif mode == "hybrid":
-                        score_info = f"RRF: {r['rrf_score']:.4f}"
-                        if r.get("bm25_rank"):
-                            score_info += f", BM25 #{r['bm25_rank']}"
-                        if r.get("vec_rank"):
-                            score_info += f", Vec #{r['vec_rank']}"
-                    elif mode == "bm25":
-                        score_info = f"BM25: {r['score']:.2f}"
-                    else:
-                        score_info = f"Dist: {r['distance']:.4f}"
-
-                    click.echo(f"[{r['rank']}] {source} (chunk {r['chunk_index']}) - {score_info}")
-                    click.echo(f"    {preview}\n")
+            _display_results(results, query, mode, rerank, use_daemon, search_time, output_json)
         finally:
             # Close DB connection (only exists in direct/non-daemon path)
             if not use_daemon:

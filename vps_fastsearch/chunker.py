@@ -1,8 +1,11 @@
 """Text chunking with overlap for context continuity."""
 
+import logging
 import re
 from collections.abc import Iterator
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Approximate tokens per character (conservative estimate for English)
 CHARS_PER_TOKEN = 4
@@ -28,6 +31,10 @@ def chunk_text(
     if not text.strip():
         return
 
+    logger.debug(
+        "Chunking text: %d chars, target=%d, overlap=%d", len(text), target_chars, overlap_chars
+    )
+
     # Normalize whitespace but preserve paragraph breaks
     text = re.sub(r"\n{3,}", "\n\n", text)
     paragraphs = re.split(r"\n\n+", text)
@@ -39,6 +46,7 @@ def chunk_text(
     current_chunk: list[str] = []
     current_size = 0
     overlap_text = ""
+    chunk_count = 0
 
     for para in paragraphs:
         para_size = len(para)
@@ -51,13 +59,16 @@ def chunk_text(
                 if overlap_text:
                     chunk_text_out = overlap_text + "\n\n" + chunk_text_out
                 yield chunk_text_out.strip()
+                chunk_count += 1
                 overlap_text = "\n\n".join(current_chunk)[-overlap_chars:] if current_chunk else ""
                 current_chunk = []
                 current_size = 0
 
             # Split long paragraph by sentences, prepending overlap so context carries through
             para_to_split = (overlap_text + "\n\n" + para) if overlap_text else para
-            yield from _split_long_paragraph(para_to_split, target_chars, overlap_chars)
+            for sub_chunk in _split_long_paragraph(para_to_split, target_chars, overlap_chars):
+                yield sub_chunk
+                chunk_count += 1
             # Update overlap_text from the end of the original paragraph (not the prepended version)
             overlap_text = para[-overlap_chars:]
             continue
@@ -69,6 +80,7 @@ def chunk_text(
             if overlap_text:
                 chunk_text_out = overlap_text + "\n\n" + chunk_text_out
             yield chunk_text_out.strip()
+            chunk_count += 1
 
             # Keep overlap from end of current chunk
             overlap_text = "\n\n".join(current_chunk)[-overlap_chars:] if current_chunk else ""
@@ -84,6 +96,9 @@ def chunk_text(
         if overlap_text:
             chunk_text_out = overlap_text + "\n\n" + chunk_text_out
         yield chunk_text_out.strip()
+        chunk_count += 1
+
+    logger.debug("Produced %d chunks", chunk_count)
 
 
 def _split_long_paragraph(

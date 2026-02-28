@@ -4,8 +4,10 @@ import logging
 import os
 import re
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import apsw
 import orjson
@@ -19,6 +21,48 @@ SCHEMA_VERSION = 2
 # Lazy import fastembed to speed up CLI startup
 _embedder_instance = None
 _reranker_instance = None
+
+
+# ---------------------------------------------------------------------------
+# TypedDict result types for search methods
+# ---------------------------------------------------------------------------
+
+
+class _BaseResult(TypedDict):
+    """Common fields present in every search result."""
+
+    id: int
+    source: str
+    chunk_index: int
+    content: str
+    metadata: dict[str, Any]
+    rank: int
+
+
+class BM25Result(_BaseResult):
+    """Result from :meth:`SearchDB.search_bm25`."""
+
+    score: float
+
+
+class VectorResult(_BaseResult):
+    """Result from :meth:`SearchDB.search_vector`."""
+
+    distance: float
+
+
+class HybridResult(_BaseResult):
+    """Result from :meth:`SearchDB.search_hybrid`."""
+
+    rrf_score: float
+    bm25_rank: int | None
+    vec_rank: int | None
+
+
+class RerankResult(_BaseResult):
+    """Result from :meth:`SearchDB.search_hybrid_reranked`."""
+
+    rerank_score: float
 
 
 class Embedder:
@@ -282,6 +326,20 @@ class SearchDB:
         """Execute SQL and return cursor."""
         return self.conn.execute(sql, params)
 
+    @contextmanager
+    def _transaction(self) -> Iterator[None]:
+        """Context manager for SQLite transactions with automatic rollback on error."""
+        self.conn.execute("BEGIN")
+        try:
+            yield
+            self.conn.execute("COMMIT")
+        except Exception:
+            try:
+                self.conn.execute("ROLLBACK")
+            except Exception:
+                pass  # ROLLBACK can fail if disk is full
+            raise
+
     def _init_schema(self) -> None:
         """Initialize database schema."""
         # Main docs table
@@ -474,7 +532,7 @@ class SearchDB:
         query: str,
         limit: int = 10,
         metadata_filter: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[BM25Result]:
         """
         Full-text search using BM25 ranking.
 
@@ -519,7 +577,7 @@ class SearchDB:
             (fts_query, *meta_params, limit),
         )
 
-        results = []
+        results: list[BM25Result] = []
         for rank, row in enumerate(cursor, 1):
             doc_id, source, chunk_index, content, metadata, score = row
             results.append(
@@ -541,7 +599,7 @@ class SearchDB:
         embedding: list[float],
         limit: int = 10,
         metadata_filter: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[VectorResult]:
         """
         Vector similarity search using cosine distance.
 
@@ -607,7 +665,7 @@ class SearchDB:
                 (sqlite_vec.serialize_float32(embedding), limit),
             )
 
-        results = []
+        results: list[VectorResult] = []
         for rank, row in enumerate(cursor, 1):
             doc_id, distance, source, chunk_index, content, metadata = row
             results.append(
@@ -633,7 +691,7 @@ class SearchDB:
         bm25_weight: float = 1.0,
         vec_weight: float = 1.0,
         metadata_filter: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[HybridResult]:
         """
         Hybrid search combining BM25 and vector search using RRF.
 
@@ -665,12 +723,12 @@ class SearchDB:
 
         # Skip BM25 if query has no word tokens (symbols, emoji, etc.)
         tokens = re.findall(r"\w+", query)
-        bm25_results = (
-            self.search_bm25(query, limit=fetch_limit, metadata_filter=metadata_filter)
-            if tokens
-            else []
-        )
-        vec_results = self.search_vector(
+        bm25_results: list[dict[str, Any]] = []
+        if tokens:
+            bm25_results = self.search_bm25(  # type: ignore[assignment]
+                query, limit=fetch_limit, metadata_filter=metadata_filter
+            )
+        vec_results: list[dict[str, Any]] = self.search_vector(  # type: ignore[assignment]
             embedding, limit=fetch_limit, metadata_filter=metadata_filter
         )
 
@@ -682,13 +740,13 @@ class SearchDB:
         all_ids = set(bm25_ranks.keys()) | set(vec_ranks.keys())
 
         # Build result lookup
-        result_lookup = {}
+        result_lookup: dict[int, dict[str, Any]] = {}
         for r in bm25_results + vec_results:
             if r["id"] not in result_lookup:
                 result_lookup[r["id"]] = r
 
         # Calculate RRF scores
-        rrf_results = []
+        rrf_results: list[dict[str, Any]] = []
         default_rank = fetch_limit + 1  # Penalty for not appearing in a list
 
         for doc_id in all_ids:
@@ -710,7 +768,7 @@ class SearchDB:
         for i, r in enumerate(rrf_results[:limit], 1):
             r["rank"] = i
 
-        return rrf_results[:limit]
+        return rrf_results[:limit]  # type: ignore[return-value]
 
     def search_hybrid_reranked(
         self,
@@ -720,7 +778,7 @@ class SearchDB:
         rerank_top_k: int = 20,
         reranker: Any = None,
         metadata_filter: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[RerankResult]:
         """
         Hybrid search with cross-encoder reranking.
 
@@ -746,7 +804,7 @@ class SearchDB:
         limit = min(limit, self.MAX_SEARCH_LIMIT)
 
         # Get candidates from hybrid search
-        candidates = self.search_hybrid(
+        candidates: list[dict[str, Any]] = self.search_hybrid(  # type: ignore[assignment]
             query, embedding, limit=rerank_top_k, metadata_filter=metadata_filter
         )
 
@@ -781,7 +839,7 @@ class SearchDB:
             result.pop("vec_rank", None)
             result.pop("score", None)
 
-        return candidates[:limit]
+        return candidates[:limit]  # type: ignore[return-value]
 
     def delete_source(self, source: str) -> int:
         """Delete all chunks from a source. Returns count deleted."""

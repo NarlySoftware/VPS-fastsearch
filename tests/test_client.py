@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.conftest import DUMMY_EMBEDDING, _make_config
 from vps_fastsearch.client import (
     DaemonNotRunningError,
     FastSearchClient,
@@ -19,23 +20,6 @@ from vps_fastsearch.client import (
     embed,
     search,
 )
-from vps_fastsearch.config import (
-    DaemonConfig,
-    FastSearchConfig,
-    MemoryConfig,
-)
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_config(socket_path: str = "/tmp/test_fastsearch_client.sock") -> FastSearchConfig:
-    return FastSearchConfig(
-        daemon=DaemonConfig(socket_path=socket_path),
-        models={},
-        memory=MemoryConfig(),
-    )
 
 
 def _short_sock_path(name: str) -> str:
@@ -124,7 +108,7 @@ class TestFastSearchClientInit:
 
     def test_default_socket_path_from_config(self) -> None:
         """When no socket_path is given, the path comes from config."""
-        fake_config = _make_config("/tmp/config_provided.sock")
+        fake_config = _make_config(socket_path="/tmp/config_provided.sock", include_models=False)
         with patch("vps_fastsearch.client.load_config", return_value=fake_config):
             client = FastSearchClient()
         assert client.socket_path == "/tmp/config_provided.sock"
@@ -421,7 +405,7 @@ class TestConvenienceFunctions:
     def test_embed_falls_back_to_direct_when_daemon_unavailable(self) -> None:
         """embed() falls back to direct Embedder path when daemon is down."""
         mock_embedder = MagicMock()
-        mock_embedder.embed.return_value = [[0.1] * 768]
+        mock_embedder.embed.return_value = [DUMMY_EMBEDDING]
 
         with (
             patch("vps_fastsearch.client.FastSearchClient") as MockClient,
@@ -449,7 +433,7 @@ class TestConvenienceFunctions:
 
     def test_embed_returns_embeddings_from_daemon(self) -> None:
         """embed() returns the embeddings list from the daemon response."""
-        fake_embeddings = [[0.1] * 768, [0.2] * 768]
+        fake_embeddings = [DUMMY_EMBEDDING, [0.2] * 768]
 
         with patch("vps_fastsearch.client.FastSearchClient") as MockClient:
             instance = MagicMock()

@@ -1,11 +1,14 @@
 """VPS-FastSearch client library for connecting to the daemon."""
 
 import json
+import logging
 import os
 import socket
 from typing import Any
 
 from .config import DEFAULT_DB_PATH, DEFAULT_SOCKET_PATH, load_config
+
+logger = logging.getLogger(__name__)
 
 
 class FastSearchError(Exception):
@@ -67,6 +70,7 @@ class FastSearchClient:
         if not os.path.exists(self.socket_path):
             raise DaemonNotRunningError(f"Daemon socket not found: {self.socket_path}")
 
+        logger.debug("Connecting to %s", self.socket_path)
         try:
             self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             self._sock.settimeout(self.timeout)
@@ -87,6 +91,7 @@ class FastSearchClient:
     def _disconnect(self) -> None:
         """Close connection."""
         if self._sock:
+            logger.debug("Disconnected")
             try:
                 self._sock.close()
             except Exception:
@@ -116,6 +121,7 @@ class FastSearchClient:
             "id": 1,
         }
 
+        logger.debug("Request: method=%s", request.get("method"))
         data = json.dumps(request).encode()
 
         # Validate message size before sending
@@ -180,6 +186,7 @@ class FastSearchClient:
             except (TimeoutError, OSError) as e:
                 self._disconnect()
                 if attempt == 0:
+                    logger.warning("Connection lost, retrying: %s", e)
                     continue  # retry once after reconnect
                 raise FastSearchError(f"Connection lost: {e}") from e
             except json.JSONDecodeError as e:
@@ -488,7 +495,7 @@ class FastSearchClient:
 
 
 # Convenience functions for quick usage
-def search(query: str, **kwargs: Any) -> list[dict[str, Any]]:
+def search(query: str, **kwargs: Any) -> list[Any]:
     """Quick search using daemon (falls back to direct if unavailable)."""
     try:
         with FastSearchClient(timeout=10.0) as client:
@@ -506,23 +513,24 @@ def search(query: str, **kwargs: Any) -> list[dict[str, Any]]:
         metadata_filter = kwargs.get("metadata_filter")
         db = SearchDB(db_path)
         try:
+            search_results: list[Any]
             if mode == "bm25":
-                results = db.search_bm25(query, limit=limit, metadata_filter=metadata_filter)
+                search_results = db.search_bm25(query, limit=limit, metadata_filter=metadata_filter)
             else:
                 embedder = get_embedder()
                 embedding = embedder.embed_single(query)
                 if rerank:
-                    results = db.search_hybrid_reranked(
+                    search_results = db.search_hybrid_reranked(
                         query, embedding, limit=limit, metadata_filter=metadata_filter
                     )
                 else:
-                    results = db.search_hybrid(
+                    search_results = db.search_hybrid(
                         query, embedding, limit=limit, metadata_filter=metadata_filter
                     )
         finally:
             db.close()
 
-        return results
+        return search_results
 
 
 def embed(texts: list[str]) -> list[list[float]]:

@@ -6,6 +6,7 @@ import asyncio
 import atexit
 import json
 import logging
+import logging.handlers
 import os
 import signal
 import socket
@@ -478,7 +479,7 @@ class FastSearchDaemon:
 
             if mode == "bm25":
 
-                def _search_bm25() -> list[dict[str, Any]]:
+                def _search_bm25() -> list[Any]:
                     with db_lock:
                         return db.search_bm25(query, limit=limit, metadata_filter=metadata_filter)
 
@@ -486,7 +487,7 @@ class FastSearchDaemon:
             elif mode == "vector":
                 embedding = list(embedder_model.instance.embed([query]))[0].tolist()
 
-                def _search_vector() -> list[dict[str, Any]]:
+                def _search_vector() -> list[Any]:
                     with db_lock:
                         return db.search_vector(
                             embedding, limit=limit, metadata_filter=metadata_filter
@@ -500,7 +501,7 @@ class FastSearchDaemon:
                     # Load reranker on-demand
                     reranker_model = await self.model_manager.load_model("reranker")
 
-                    def _search_hybrid_reranked() -> list[dict[str, Any]]:
+                    def _search_hybrid_reranked() -> list[Any]:
                         with db_lock:
                             return db.search_hybrid_reranked(
                                 query,
@@ -514,7 +515,7 @@ class FastSearchDaemon:
                     results = await loop.run_in_executor(None, _search_hybrid_reranked)
                 else:
 
-                    def _search_hybrid() -> list[dict[str, Any]]:
+                    def _search_hybrid() -> list[Any]:
                         with db_lock:
                             return db.search_hybrid(
                                 query,
@@ -1157,6 +1158,21 @@ def run_daemon(
         os.dup2(devnull, 2)
         if devnull > 2:
             os.close(devnull)
+
+        # Configure file-based logging since stdout/stderr are now /dev/null
+        _xdg_state = os.environ.get("XDG_STATE_HOME", os.path.join(Path.home(), ".local", "state"))
+        log_dir = Path(_xdg_state) / "fastsearch"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "daemon.log"
+
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file, maxBytes=5 * 1024 * 1024, backupCount=3
+        )
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        )
+        logging.getLogger().addHandler(file_handler)
+        logger.info("Daemon started in detached mode, logging to %s", log_file)
 
     daemon = FastSearchDaemon(config)
 

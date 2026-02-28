@@ -3,7 +3,17 @@
 from .chunker import chunk_markdown, chunk_text
 from .client import DaemonNotRunningError, FastSearchClient, embed, search
 from .config import FastSearchConfig, create_default_config, load_config
-from .core import Embedder, Reranker, SearchDB, get_embedder, get_reranker
+from .core import (
+    BM25Result,
+    Embedder,
+    HybridResult,
+    Reranker,
+    RerankResult,
+    SearchDB,
+    VectorResult,
+    get_embedder,
+    get_reranker,
+)
 
 __version__ = "0.3.0"
 __all__ = [
@@ -13,6 +23,11 @@ __all__ = [
     "SearchDB",
     "get_embedder",
     "get_reranker",
+    # Search result types
+    "BM25Result",
+    "VectorResult",
+    "HybridResult",
+    "RerankResult",
     # Chunking
     "chunk_text",
     "chunk_markdown",

@@ -4,15 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import DUMMY_EMBEDDING
 from vps_fastsearch.core import SearchDB
-
-
-@pytest.fixture
-def db(tmp_path):
-    """Create a temporary SearchDB instance."""
-    database = SearchDB(tmp_path / "test.db")
-    yield database
-    database.close()
 
 
 def test_init_schema(db) -> None:
@@ -28,7 +21,7 @@ def test_init_schema(db) -> None:
 
 def test_index_and_search_bm25(db) -> None:
     """Indexed document should be findable via BM25 search."""
-    embedding = [0.1] * 768
+    embedding = DUMMY_EMBEDDING
     db.index_document("test.md", 0, "Python is a programming language", embedding)
 
     results = db.search_bm25("Python programming", limit=5)
@@ -58,7 +51,7 @@ def test_search_hybrid(db) -> None:
 
 def test_delete_source(db) -> None:
     """Deleting a source should remove its documents."""
-    embedding = [0.1] * 768
+    embedding = DUMMY_EMBEDDING
     db.index_document("deleteme.md", 0, "This will be deleted", embedding)
     db.index_document("keepme.md", 0, "This will remain", embedding)
 
@@ -74,7 +67,7 @@ def test_delete_source(db) -> None:
 
 def test_get_stats(db) -> None:
     """Stats should reflect indexed documents."""
-    embedding = [0.1] * 768
+    embedding = DUMMY_EMBEDDING
     db.index_document("file1.md", 0, "First document", embedding)
     db.index_document("file1.md", 1, "Second chunk", embedding)
     db.index_document("file2.md", 0, "Another file", embedding)
@@ -94,7 +87,7 @@ def test_get_stats(db) -> None:
 
 def test_search_bm25_empty_query(db) -> None:
     """BM25 search with an empty query string should return an empty list."""
-    embedding = [0.1] * 768
+    embedding = DUMMY_EMBEDDING
     db.index_document("test.md", 0, "Python is a programming language", embedding)
 
     results = db.search_bm25("", limit=5)
@@ -103,7 +96,7 @@ def test_search_bm25_empty_query(db) -> None:
 
 def test_search_bm25_special_chars_only(db) -> None:
     """BM25 search with only special characters should return an empty list."""
-    embedding = [0.1] * 768
+    embedding = DUMMY_EMBEDDING
     db.index_document("test.md", 0, "Python is a programming language", embedding)
 
     results = db.search_bm25("@#$%^&", limit=5)
@@ -113,10 +106,10 @@ def test_search_bm25_special_chars_only(db) -> None:
 def test_search_hybrid_empty_query_still_vector_searches(db) -> None:
     """Hybrid search with an empty query (no BM25 tokens) should still return
     vector results — BM25 is skipped but vector search proceeds."""
-    embedding = [0.1] * 768
+    embedding = DUMMY_EMBEDDING
     db.index_document("test.md", 0, "Some content for vector search", embedding)
 
-    results = db.search_hybrid("", [0.1] * 768, limit=5)
+    results = db.search_hybrid("", DUMMY_EMBEDDING, limit=5)
     # Vector leg should still find the document
     assert len(results) >= 1
     assert "rrf_score" in results[0]
@@ -134,7 +127,7 @@ def test_index_document_wrong_dimensions(db) -> None:
 
 def test_index_batch_wrong_dimensions(db) -> None:
     """index_batch with one bad embedding should raise ValueError and leave no rows inserted."""
-    good_embedding = [0.1] * 768
+    good_embedding = DUMMY_EMBEDDING
     bad_embedding = [0.1] * 100
 
     items = [
@@ -160,7 +153,7 @@ def test_search_vector_wrong_dimensions(db) -> None:
 
 def test_search_bm25_limit_zero(db) -> None:
     """BM25 search with limit=0 should return an empty list."""
-    embedding = [0.1] * 768
+    embedding = DUMMY_EMBEDDING
     db.index_document("test.md", 0, "Python is a programming language", embedding)
 
     results = db.search_bm25("Python", limit=0)
@@ -191,7 +184,7 @@ def test_index_document_transaction_rollback(db) -> None:
 def test_index_and_search_unicode(db) -> None:
     """Index a document containing Unicode (Japanese text and emoji) and
     confirm it is retrievable via BM25 using ASCII terms in the same content."""
-    embedding = [0.1] * 768
+    embedding = DUMMY_EMBEDDING
     content = "Hello world \u3053\u3093\u306b\u3061\u306f \U0001f600 Python"
     db.index_document("unicode.md", 0, content, embedding)
 
@@ -292,7 +285,7 @@ def test_backward_compat_absolute_source_paths(db) -> None:
     """Databases with absolute source paths (pre-relative-path era) should
     still work: to_absolute passes absolute paths through unchanged."""
     abs_source = "/home/eva/docs/old_file.md"
-    embedding = [0.1] * 768
+    embedding = DUMMY_EMBEDDING
     db.index_document(abs_source, 0, "Legacy absolute path content", embedding)
 
     results = db.search_bm25("Legacy", limit=5)
@@ -332,7 +325,7 @@ def test_schema_version_updated_to_2(db) -> None:
 
 def test_delete_by_id(db) -> None:
     """delete_by_id should remove a single document and keep others intact."""
-    emb = [0.1] * 768
+    emb = DUMMY_EMBEDDING
     id1 = db.index_document("a.md", 0, "First document", emb)
     id2 = db.index_document("a.md", 1, "Second document", emb)
 
@@ -356,7 +349,7 @@ def test_delete_by_id_nonexistent(db) -> None:
 
 def test_delete_by_id_fts_sync(db) -> None:
     """After delete_by_id, FTS should not find the deleted document."""
-    emb = [0.1] * 768
+    emb = DUMMY_EMBEDDING
     doc_id = db.index_document("x.md", 0, "Unique banana content", emb)
     db.index_document("y.md", 0, "Other apple content", emb)
 
@@ -399,12 +392,12 @@ def test_update_content(db) -> None:
 
 def test_update_content_nonexistent(db) -> None:
     """update_content on a missing ID should return False."""
-    assert db.update_content(9999, "content", [0.1] * 768) is False
+    assert db.update_content(9999, "content", DUMMY_EMBEDDING) is False
 
 
 def test_update_content_wrong_dimensions(db) -> None:
     """update_content with wrong embedding dims should raise ValueError."""
-    emb = [0.1] * 768
+    emb = DUMMY_EMBEDDING
     doc_id = db.index_document("u.md", 0, "Some content", emb)
 
     with pytest.raises(ValueError, match="768"):
@@ -423,7 +416,7 @@ def test_list_sources_empty(db) -> None:
 
 def test_list_sources(db) -> None:
     """list_sources should return all sources with correct chunk counts."""
-    emb = [0.1] * 768
+    emb = DUMMY_EMBEDDING
     db.index_document("file1.md", 0, "Chunk 0", emb)
     db.index_document("file1.md", 1, "Chunk 1", emb)
     db.index_document("file2.md", 0, "Only chunk", emb)
@@ -451,7 +444,7 @@ def test_list_sources(db) -> None:
 def db_with_metadata(tmp_path):
     """Create a SearchDB with documents that have metadata."""
     database = SearchDB(tmp_path / "meta_test.db")
-    embedding = [0.1] * 768
+    embedding = DUMMY_EMBEDDING
 
     database.index_document(
         "doc1.md",
@@ -551,7 +544,7 @@ def test_bm25_metadata_filter_boolean(db_with_metadata) -> None:
 def test_vector_single_metadata_filter(db_with_metadata) -> None:
     """Vector search with metadata filter should only return matching docs."""
     results = db_with_metadata.search_vector(
-        [0.1] * 768,
+        DUMMY_EMBEDDING,
         limit=10,
         metadata_filter={"author": "alice"},
     )
@@ -563,7 +556,7 @@ def test_vector_single_metadata_filter(db_with_metadata) -> None:
 def test_vector_metadata_filter_no_match(db_with_metadata) -> None:
     """Vector search with filter matching nothing should return empty list."""
     results = db_with_metadata.search_vector(
-        [0.1] * 768,
+        DUMMY_EMBEDDING,
         limit=10,
         metadata_filter={"author": "nobody"},
     )
@@ -572,7 +565,7 @@ def test_vector_metadata_filter_no_match(db_with_metadata) -> None:
 
 def test_vector_no_metadata_filter_backward_compat(db_with_metadata) -> None:
     """Vector search without metadata filter returns all docs."""
-    results = db_with_metadata.search_vector([0.1] * 768, limit=10)
+    results = db_with_metadata.search_vector(DUMMY_EMBEDDING, limit=10)
     assert len(results) == 4
 
 
@@ -580,7 +573,7 @@ def test_hybrid_metadata_filter(db_with_metadata) -> None:
     """Hybrid search with metadata filter should only return matching docs."""
     results = db_with_metadata.search_hybrid(
         "programming",
-        [0.1] * 768,
+        DUMMY_EMBEDDING,
         limit=10,
         metadata_filter={"category": "tech"},
     )
@@ -591,7 +584,7 @@ def test_hybrid_metadata_filter(db_with_metadata) -> None:
 
 def test_hybrid_no_metadata_filter_backward_compat(db_with_metadata) -> None:
     """Hybrid search without metadata filter returns all relevant docs."""
-    results = db_with_metadata.search_hybrid("programming", [0.1] * 768, limit=10)
+    results = db_with_metadata.search_hybrid("programming", DUMMY_EMBEDDING, limit=10)
     assert len(results) >= 2
 
 

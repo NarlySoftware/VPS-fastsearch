@@ -10,12 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import orjson
 
-from vps_fastsearch.config import (
-    DaemonConfig,
-    FastSearchConfig,
-    MemoryConfig,
-    ModelConfig,
-)
+from tests.conftest import DUMMY_EMBEDDING, _make_config
 from vps_fastsearch.daemon import (
     FastSearchDaemon,
     LoadedModel,
@@ -25,36 +20,6 @@ from vps_fastsearch.daemon import (
     get_daemon_status,
     stop_daemon,
 )
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_config(
-    max_ram_mb: int = 4000,
-    socket_path: str = "/tmp/test_fastsearch.sock",
-    pid_path: str = "/tmp/test_fastsearch.pid",
-) -> FastSearchConfig:
-    """Build a minimal FastSearchConfig for testing."""
-    return FastSearchConfig(
-        daemon=DaemonConfig(socket_path=socket_path, pid_path=pid_path),
-        models={
-            "embedder": ModelConfig(
-                name="BAAI/bge-base-en-v1.5",
-                keep_loaded="always",
-                idle_timeout_seconds=0,
-                threads=2,
-            ),
-            "reranker": ModelConfig(
-                name="cross-encoder/ms-marco-MiniLM-L-6-v2",
-                keep_loaded="on_demand",
-                idle_timeout_seconds=300,
-                threads=2,
-            ),
-        },
-        memory=MemoryConfig(max_ram_mb=max_ram_mb),
-    )
 
 
 def _make_loaded_model(slot: str = "embedder", ref_count: int = 0) -> LoadedModel:
@@ -528,7 +493,7 @@ class TestHandleBatchIndex:
             "source": source,
             "chunk_index": chunk_index,
             "content": content,
-            "embedding": [0.1] * 768,
+            "embedding": DUMMY_EMBEDDING,
             "metadata": {"tag": "test"},
         }
 
@@ -666,7 +631,7 @@ class TestHandleBatchIndex:
                             "source": 123,
                             "chunk_index": 0,
                             "content": "text",
-                            "embedding": [0.1] * 768,
+                            "embedding": DUMMY_EMBEDDING,
                         }
                     ],
                 },
@@ -690,7 +655,7 @@ class TestHandleBatchIndex:
                             "source": "a.txt",
                             "chunk_index": "zero",
                             "content": "text",
-                            "embedding": [0.1] * 768,
+                            "embedding": DUMMY_EMBEDDING,
                         }
                     ],
                 },
@@ -896,7 +861,7 @@ class TestHandleUpdateContent:
         # Mock the model manager to return a mock embedder
         mock_embedder = MagicMock()
         mock_embedding = MagicMock()
-        mock_embedding.tolist.return_value = [0.1] * 768
+        mock_embedding.tolist.return_value = DUMMY_EMBEDDING
         mock_embedder.instance.embed.return_value = iter([mock_embedding])
 
         async def mock_load_model(slot: str) -> Any:
@@ -926,7 +891,7 @@ class TestHandleUpdateContent:
         assert "result" in response
         assert response["result"]["updated"] is True
         assert response["result"]["id"] == 5
-        mock_db.update_content.assert_called_once_with(5, "updated text", [0.1] * 768)
+        mock_db.update_content.assert_called_once_with(5, "updated text", DUMMY_EMBEDDING)
 
     def test_update_content_missing_id_error(self) -> None:
         """update_content without id returns -32602."""

@@ -34,8 +34,19 @@ jobs:
       - name: Type check with mypy
         run: mypy vps_fastsearch/ --strict --ignore-missing-imports
 
-      - name: Run tests
-        run: pytest tests/ -v
+      - name: Run tests with coverage
+        run: pytest tests/ -v --cov=vps_fastsearch --cov-report=term-missing --cov-report=xml
+
+      - name: Print coverage summary
+        run: |
+          python -c "
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('coverage.xml')
+          root = tree.getroot()
+          line_rate = float(root.get('line-rate', 0))
+          coverage_pct = line_rate * 100
+          print(f'\\nCoverage Summary: {coverage_pct:.1f}%')
+          "
 
       - name: Test import
         run: python -c "from vps_fastsearch import FastSearchClient, search, embed; print('Import OK')"
