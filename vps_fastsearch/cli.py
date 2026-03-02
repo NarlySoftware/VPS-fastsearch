@@ -719,8 +719,13 @@ def list_sources(ctx: click.Context, output_json: bool) -> None:
     type=click.Path(exists=True, file_okay=False),
     help="Set/override base directory before migration",
 )
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Allow migration even when paths fall outside base directory",
+)
 @click.pass_context
-def migrate_paths(ctx: click.Context, dry_run: bool, base_dir: str | None) -> None:
+def migrate_paths(ctx: click.Context, dry_run: bool, base_dir: str | None, force: bool) -> None:
     """Convert legacy absolute source paths to relative paths."""
     db_path = ctx.obj["db_path"]
 
@@ -770,6 +775,23 @@ def migrate_paths(ctx: click.Context, dry_run: bool, base_dir: str | None) -> No
             else:
                 seen_targets[rel] = abs_src
                 migrations.append((abs_src, rel))
+
+        # Detect paths outside base_dir (produce ../ prefixes)
+        outside = [(a, r) for a, r in migrations if r.startswith("..")]
+        if outside and not force:
+            click.echo(
+                f"\nError: {len(outside)} path(s) fall outside base directory "
+                f"({db.base_dir}):",
+                err=True,
+            )
+            for abs_src, rel in outside:
+                click.echo(f"  {abs_src} -> {rel}", err=True)
+            click.echo(
+                "\nThis usually means --base-dir is wrong. "
+                "Use --force to migrate anyway.",
+                err=True,
+            )
+            sys.exit(1)
 
         # Display plan
         click.echo(f"\nTotal sources: {len(sources)}")

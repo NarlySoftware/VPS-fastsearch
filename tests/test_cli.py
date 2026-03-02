@@ -108,6 +108,32 @@ def test_cli_migrate_paths_collision(tmp_path) -> None:
     assert "SKIPPED" in result.output
 
 
+def test_cli_migrate_paths_outside_base_dir(tmp_path) -> None:
+    """migrate-paths should abort when paths fall outside base_dir."""
+    db_path = str(tmp_path / "migrate.db")
+    db = SearchDB(db_path)
+    # Set base_dir to a subdirectory so the indexed path is outside it
+    sub = tmp_path / "narrow"
+    sub.mkdir()
+    db.set_base_dir(str(sub))
+    abs_source = str(tmp_path / "outside" / "file.md")
+    db.index_document(abs_source, 0, "Outside base_dir", DUMMY_EMBEDDING)
+    db.close()
+
+    runner = CliRunner()
+    # Without --force, should fail
+    result = runner.invoke(cli, ["--db", db_path, "migrate-paths", "--dry-run"])
+    assert result.exit_code != 0
+    assert "fall outside base directory" in result.output or "fall outside base directory" in (
+        result.output + (result.stderr if hasattr(result, "stderr") else "")
+    )
+
+    # With --force, should succeed
+    result = runner.invoke(cli, ["--db", db_path, "migrate-paths", "--dry-run", "--force"])
+    assert result.exit_code == 0
+    assert "To convert: 1" in result.output
+
+
 def test_cli_migrate_paths_all_relative(tmp_path) -> None:
     """migrate-paths on a DB with only relative paths should say nothing to do."""
     db_path = str(tmp_path / "migrate.db")
