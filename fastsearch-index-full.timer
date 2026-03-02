@@ -1,0 +1,10 @@
+[Unit]
+Description=Run FastSearch full reindex nightly
+
+[Timer]
+OnCalendar=*-*-* 02:17:00
+Persistent=true
+Unit=fastsearch-index-full.service
+
+[Install]
+WantedBy=timers.target

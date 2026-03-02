@@ -1,0 +1,10 @@
+[Unit]
+Description=FastSearch incremental index (changed files)
+After=vps-fastsearch.service
+Wants=vps-fastsearch.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/venv/bin/python3 %h/.openclaw/workspace/scripts/fastsearch_index.py --mode incremental
+Environment="FASTSEARCH_CONFIG=%h/.config/fastsearch/config.yaml"
+Environment="FASTSEARCH_DB=%h/.local/share/fastsearch/fastsearch.db"

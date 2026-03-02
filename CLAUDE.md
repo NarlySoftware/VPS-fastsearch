@@ -86,6 +86,43 @@ JSON-RPC 2.0 over Unix socket. 13 methods: `ping`, `status`, `search`, `embed`, 
 - **Relative paths**: Source paths stored relative to a configurable `base_dir` (stored in `db_meta` table). Supports `--base-dir` CLI option and `to_relative`/`to_absolute` methods on SearchDB.
 - **List sources**: `list` CLI command and `list_sources` RPC method show all indexed sources with chunk counts and ID ranges.
 
+## Deployment & Scheduling
+
+### Systemd Units (in repo root)
+
+All units are **user-level** (`~/.config/systemd/user/`). Use `%h` for home directory portability.
+
+- **`vps-fastsearch.service`** — Main daemon (long-running, auto-restart)
+- **`fastsearch-index-incremental.timer`** — Triggers incremental indexing every 15 minutes (+ 3 min after boot)
+- **`fastsearch-index-incremental.service`** — Oneshot: runs the indexer script in `--mode incremental`
+- **`fastsearch-index-full.timer`** — Triggers full reindex nightly at 02:17
+- **`fastsearch-index-full.service`** — Oneshot: runs the indexer script in `--mode full`
+
+### Installation
+
+```bash
+# Copy units to user systemd directory
+cp vps-fastsearch.service fastsearch-index-*.service fastsearch-index-*.timer \
+   ~/.config/systemd/user/
+
+# Reload, enable, and start
+systemctl --user daemon-reload
+systemctl --user enable --now vps-fastsearch.service
+systemctl --user enable --now fastsearch-index-incremental.timer
+systemctl --user enable --now fastsearch-index-full.timer
+
+# Enable lingering so user services run without login
+loginctl enable-linger $USER
+```
+
+### Important Notes
+
+- **Do NOT use crontab** for indexing — use only systemd timers (they have `After=vps-fastsearch.service` dependency)
+- The indexer script path in the service files must be updated to match your deployment (default: `%h/.openclaw/workspace/scripts/fastsearch_index.py`)
+- An example generic indexer is provided at `examples/incremental_indexer.py`
+- Check timer status: `systemctl --user list-timers`
+- Check indexer logs: `journalctl --user -u fastsearch-index-incremental.service`
+
 ## Key Dependencies
 
 - `fastembed` — ONNX-based embedding inference
