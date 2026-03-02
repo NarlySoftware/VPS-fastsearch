@@ -15,7 +15,7 @@ def test_cli_version() -> None:
     result = runner.invoke(cli, ["--version"])
     assert result.exit_code == 0
     assert "vps-fastsearch" in result.output
-    assert "0.3.0" in result.output
+    assert "0.3.1" in result.output
 
 
 def test_cli_help() -> None:
