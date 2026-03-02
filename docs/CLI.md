@@ -10,6 +10,7 @@ vps-fastsearch [OPTIONS] COMMAND [ARGS]...
 
 | Option | Environment Variable | Description |
 |--------|---------------------|-------------|
+| `--version` | | Show the version and exit |
 | `--db PATH` | `FASTSEARCH_DB` | Database path (default: `fastsearch.db`) |
 | `--config PATH` | `FASTSEARCH_CONFIG` | Config file path |
 | `--help` | | Show help message |
@@ -21,7 +22,9 @@ vps-fastsearch [OPTIONS] COMMAND [ARGS]...
 | `index` | Index files or directories |
 | `search` | Search indexed documents |
 | `stats` | Show database statistics |
-| `delete` | Delete indexed source |
+| `delete` | Delete documents by source name or by ID |
+| `list` | List all indexed sources with chunk counts |
+| `migrate-paths` | Convert absolute or misaligned relative source paths |
 | `daemon` | Manage the daemon server |
 | `config` | Manage configuration |
 
@@ -47,6 +50,8 @@ vps-fastsearch index PATH [OPTIONS]
 |--------|---------|-------------|
 | `-g, --glob PATTERN` | `*.md` | Glob pattern for directory indexing |
 | `--reindex` | `false` | Delete existing chunks before indexing |
+| `--base-dir DIRECTORY` | DB parent dir | Base directory for relative path storage |
+| `--strict` | `false` | Reject files outside base_dir (portable mode) |
 
 ### Examples
 
@@ -114,6 +119,7 @@ vps-fastsearch search QUERY [OPTIONS]
 | `-n, --limit N` | `5` | Number of results to return |
 | `-m, --mode MODE` | `hybrid` | Search mode: `hybrid`, `bm25`, `vector` |
 | `-r, --rerank` | `false` | Use cross-encoder reranking |
+| `-f, --filter TEXT` | | Metadata filter as `key=value` (repeatable, AND logic) |
 | `--no-daemon` | `false` | Force direct mode (skip daemon) |
 | `--json` | `false` | Output as JSON |
 
@@ -230,17 +236,23 @@ Top sources by chunks:
 
 ## delete
 
-Delete all chunks from a source file.
+Delete documents by source name or by ID.
 
 ```bash
-vps-fastsearch delete SOURCE
+vps-fastsearch delete [SOURCE] [OPTIONS]
 ```
 
 ### Arguments
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `SOURCE` | Yes | Source file path (partial match supported) |
+| `SOURCE` | No | Source file path (partial match supported) |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--id INTEGER` | Delete a single document by ID |
 
 ### Examples
 
@@ -251,21 +263,83 @@ vps-fastsearch delete "/path/to/README.md"
 # Delete by filename (partial match)
 vps-fastsearch delete "README.md"
 
-# Delete by partial match
-vps-fastsearch delete "README"
-```
-
-### Output
-
-```
-Deleted 8 chunks from /path/to/README.md
+# Delete a single document by ID
+vps-fastsearch delete --id 42
 ```
 
 ### Notes
 
-- Supports partial matching
-- If multiple matches found, you'll be asked to be more specific
+- Provide a SOURCE name to delete all chunks for that source (supports partial match)
+- Use `--id` to delete a single document by its numeric ID
 - Deletion is immediate (no undo)
+
+---
+
+## list
+
+List all indexed sources with chunk counts.
+
+```bash
+vps-fastsearch list [OPTIONS]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+### Examples
+
+```bash
+# List all indexed sources
+vps-fastsearch list
+
+# JSON output for scripting
+vps-fastsearch list --json
+```
+
+---
+
+## migrate-paths
+
+Convert absolute or misaligned relative source paths to clean relative paths.
+
+```bash
+vps-fastsearch migrate-paths [OPTIONS]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Show what would change without modifying the DB |
+| `--base-dir DIRECTORY` | Set/override base directory before migration |
+| `--old-base-dir DIRECTORY` | Rebase relative paths: resolve against old base dir, re-relativize against current |
+| `--force` | Allow migration even when paths fall outside base directory |
+
+### Examples
+
+```bash
+# Preview what would change
+vps-fastsearch migrate-paths --dry-run
+
+# Convert absolute paths to relative
+vps-fastsearch migrate-paths
+
+# Rebase paths that were relative to a different directory
+vps-fastsearch migrate-paths --old-base-dir /home/user/.local/share/fastsearch
+
+# Set a new base directory and migrate
+vps-fastsearch migrate-paths --base-dir /home/user/workspace
+```
+
+### Notes
+
+- Without `--old-base-dir`, converts absolute paths to relative
+- With `--old-base-dir`, also rebases relative paths computed against a different base directory
+- Use `--dry-run` first to preview changes
+- Use `--force` if some paths fall outside the base directory
 
 ---
 
