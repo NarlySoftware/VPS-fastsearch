@@ -720,13 +720,30 @@ def list_sources(ctx: click.Context, output_json: bool) -> None:
     help="Set/override base directory before migration",
 )
 @click.option(
+    "--old-base-dir",
+    default=None,
+    type=click.Path(file_okay=False),
+    help="Rebase relative paths: resolve against OLD base dir, re-relativize against current",
+)
+@click.option(
     "--force",
     is_flag=True,
     help="Allow migration even when paths fall outside base directory",
 )
 @click.pass_context
-def migrate_paths(ctx: click.Context, dry_run: bool, base_dir: str | None, force: bool) -> None:
-    """Convert legacy absolute source paths to relative paths."""
+def migrate_paths(
+    ctx: click.Context,
+    dry_run: bool,
+    base_dir: str | None,
+    old_base_dir: str | None,
+    force: bool,
+) -> None:
+    """Convert absolute or misaligned relative source paths to clean relative paths.
+
+    Without --old-base-dir, converts absolute paths to relative.
+    With --old-base-dir, also rebases relative paths that were computed against
+    a different base directory (e.g. ../../../ style paths).
+    """
     db_path = ctx.obj["db_path"]
 
     if not Path(db_path).exists():
@@ -739,6 +756,8 @@ def migrate_paths(ctx: click.Context, dry_run: bool, base_dir: str | None, force
             db.set_base_dir(base_dir)
 
         click.echo(f"Base directory: {db.base_dir}")
+        if old_base_dir is not None:
+            click.echo(f"Old base directory: {old_base_dir}")
 
         # Get all distinct source values
         rows = list(db._execute("SELECT DISTINCT source FROM docs"))
@@ -748,23 +767,49 @@ def migrate_paths(ctx: click.Context, dry_run: bool, base_dir: str | None, force
             click.echo("No documents found in database.")
             return
 
-        absolute = []
-        already_relative = []
+        absolute: list[str] = []
+        already_relative: list[str] = []
         for src in sources:
             if Path(src).is_absolute():
                 absolute.append(src)
             else:
                 already_relative.append(src)
 
-        if not absolute:
-            click.echo(f"All {len(sources)} source(s) are already relative. Nothing to migrate.")
-            return
-
-        # Compute relative paths and detect collisions
-        existing_relative = set(already_relative)
+        # Compute migrations for absolute paths
         migrations: list[tuple[str, str]] = []
         collisions: list[tuple[str, str]] = []
         seen_targets: dict[str, str] = {}
+        # Track which relative paths will be rewritten (so they don't block collisions)
+        rebase_old_paths: set[str] = set()
+
+        # Phase 1: Rebase misaligned relative paths (--old-base-dir)
+        if old_base_dir is not None:
+            old_base = Path(old_base_dir).resolve()
+            dotdot = [s for s in already_relative if s.startswith("..")]
+            if dotdot:
+                click.echo(f"\nRelative paths to rebase: {len(dotdot)}")
+            for rel_src in dotdot:
+                # Resolve against old base dir to recover the correct absolute path
+                correct_abs = str((old_base / rel_src).resolve())
+                new_rel = db.to_relative(correct_abs)
+                if new_rel == rel_src:
+                    continue  # No change needed
+                if new_rel in seen_targets:
+                    collisions.append((rel_src, new_rel))
+                else:
+                    seen_targets[new_rel] = rel_src
+                    rebase_old_paths.add(rel_src)
+                    migrations.append((rel_src, new_rel))
+            # Remove rebased paths from already_relative for collision checks
+            already_relative = [s for s in already_relative if s not in rebase_old_paths]
+
+        # Phase 2: Convert absolute paths
+        existing_relative = set(already_relative)
+        if not absolute and not migrations:
+            click.echo(
+                f"\nAll {len(sources)} source(s) are already relative. Nothing to migrate."
+            )
+            return
 
         for abs_src in absolute:
             rel = db.to_relative(abs_src)
@@ -793,21 +838,26 @@ def migrate_paths(ctx: click.Context, dry_run: bool, base_dir: str | None, force
             )
             sys.exit(1)
 
+        if not migrations and not collisions:
+            click.echo(
+                f"\nAll {len(sources)} source(s) are already relative. Nothing to migrate."
+            )
+            return
+
         # Display plan
         click.echo(f"\nTotal sources: {len(sources)}")
-        click.echo(f"Already relative: {len(already_relative)}")
         click.echo(f"To convert: {len(migrations)}")
         click.echo(f"Collisions (skipped): {len(collisions)}")
 
         if migrations:
             click.echo("\nConversions:")
-            for abs_src, rel in migrations:
-                click.echo(f"  {abs_src} -> {rel}")
+            for old_src, new_rel in migrations:
+                click.echo(f"  {old_src} -> {new_rel}")
 
         if collisions:
             click.echo("\nCollisions (would overwrite existing):")
-            for abs_src, rel in collisions:
-                click.echo(f"  {abs_src} -> {rel} (SKIPPED)")
+            for old_src, new_rel in collisions:
+                click.echo(f"  {old_src} -> {new_rel} (SKIPPED)")
 
         if dry_run:
             click.echo("\n[dry-run] No changes made.")
@@ -816,14 +866,14 @@ def migrate_paths(ctx: click.Context, dry_run: bool, base_dir: str | None, force
         # Apply migrations
         converted = 0
         with db._transaction():
-            for abs_src, rel in migrations:
+            for old_src, new_rel in migrations:
                 db._execute(
                     "UPDATE docs SET source = ? WHERE source = ?",
-                    (rel, abs_src),
+                    (new_rel, old_src),
                 )
                 converted += 1
 
-        click.echo(f"\nMigrated {converted} source(s) to relative paths.")
+        click.echo(f"\nMigrated {converted} source(s).")
     finally:
         db.close()
 

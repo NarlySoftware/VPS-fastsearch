@@ -134,6 +134,73 @@ def test_cli_migrate_paths_outside_base_dir(tmp_path) -> None:
     assert "To convert: 1" in result.output
 
 
+def test_cli_migrate_paths_rebase_old_base_dir(tmp_path) -> None:
+    """--old-base-dir should rebase ../  relative paths against the correct base."""
+    db_path = str(tmp_path / "migrate.db")
+    db = SearchDB(db_path)
+    # Simulate the VM scenario: base_dir is workspace, but paths were computed
+    # relative to a different directory (e.g. the DB location 3 levels deep)
+    workspace = tmp_path / "home" / "eva" / ".openclaw" / "workspace"
+    workspace.mkdir(parents=True)
+    old_base = tmp_path / "home" / "eva" / ".local" / "share" / "fastsearch"
+    old_base.mkdir(parents=True)
+    db.set_base_dir(str(workspace))
+
+    # The file is at workspace/MEMORY.md, but was stored as a relative path
+    # computed from old_base (the DB directory), giving ../../../.openclaw/workspace/MEMORY.md
+    import os
+
+    bad_rel = os.path.relpath(
+        str(workspace / "MEMORY.md"), str(old_base)
+    )
+    assert bad_rel.startswith("..")  # Sanity check: it's a ../ path
+    db.index_document(bad_rel, 0, "Misaligned relative", DUMMY_EMBEDDING)
+    db.close()
+
+    runner = CliRunner()
+    # Dry-run should show the rebase plan
+    result = runner.invoke(
+        cli,
+        ["--db", db_path, "migrate-paths", "--dry-run", "--old-base-dir", str(old_base)],
+    )
+    assert result.exit_code == 0
+    assert "To convert: 1" in result.output
+    assert "MEMORY.md" in result.output
+    assert "dry-run" in result.output.lower()
+
+    # Actual run should fix the path
+    result = runner.invoke(
+        cli,
+        ["--db", db_path, "migrate-paths", "--old-base-dir", str(old_base)],
+    )
+    assert result.exit_code == 0
+    assert "Migrated 1 source" in result.output
+
+    # Verify the path is now clean
+    db2 = SearchDB(db_path)
+    sources = [r[0] for r in db2._execute("SELECT DISTINCT source FROM docs")]
+    db2.close()
+    assert sources == ["MEMORY.md"]
+
+
+def test_cli_migrate_paths_rebase_no_change(tmp_path) -> None:
+    """--old-base-dir should skip paths that are already correct."""
+    db_path = str(tmp_path / "migrate.db")
+    db = SearchDB(db_path)
+    db.set_base_dir(str(tmp_path))
+    # Already clean relative path
+    db.index_document("docs/file.md", 0, "Clean path", DUMMY_EMBEDDING)
+    db.close()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["--db", db_path, "migrate-paths", "--old-base-dir", str(tmp_path)],
+    )
+    assert result.exit_code == 0
+    assert "already relative" in result.output.lower()
+
+
 def test_cli_migrate_paths_all_relative(tmp_path) -> None:
     """migrate-paths on a DB with only relative paths should say nothing to do."""
     db_path = str(tmp_path / "migrate.db")
