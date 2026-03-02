@@ -195,8 +195,11 @@ def config_path() -> None:
     type=click.Path(exists=True, file_okay=False),
     help="Base directory for relative path storage (default: DB file's parent directory)",
 )
+@click.option("--strict", is_flag=True, help="Reject files outside base_dir (portable mode)")
 @click.pass_context
-def index(ctx: click.Context, path: str, glob: str, reindex: bool, base_dir: str | None) -> None:
+def index(
+    ctx: click.Context, path: str, glob: str, reindex: bool, base_dir: str | None, strict: bool
+) -> None:
     """Index a file or directory of documents."""
     index_path = Path(path).resolve()
     db = SearchDB(ctx.obj["db_path"])
@@ -240,8 +243,17 @@ def index(ctx: click.Context, path: str, glob: str, reindex: bool, base_dir: str
 
             total_chunks = 0
             total_time = 0.0
+            skipped_strict = 0
 
             for file_path in files:
+                if strict and not db.is_within_base_dir(file_path):
+                    click.echo(
+                        f"  Skipping {file_path}: outside base_dir ({db.base_dir})",
+                        err=True,
+                    )
+                    skipped_strict += 1
+                    continue
+
                 source = db.to_relative(file_path.resolve())
 
                 # Delete existing if reindexing
@@ -301,6 +313,11 @@ def index(ctx: click.Context, path: str, glob: str, reindex: bool, base_dir: str
 
             logger.info("Indexed %d chunks from %d files", total_chunks, len(files))
             click.echo(f"\nIndexed {total_chunks} chunks in {total_time:.2f}s")
+            if skipped_strict:
+                click.echo(
+                    f"Skipped {skipped_strict} file(s) outside base_dir (--strict)",
+                    err=True,
+                )
         finally:
             if client:
                 client.close()
@@ -690,6 +707,101 @@ def list_sources(ctx: click.Context, output_json: bool) -> None:
                         name = "..." + name[-55:]
                     click.echo(f"{name:<60} {s['chunks']:>6}  {s['min_id']}-{s['max_id']:>6}")
                 click.echo(f"\nTotal: {len(sources)} source(s)")
+    finally:
+        db.close()
+
+
+@cli.command("migrate-paths")
+@click.option("--dry-run", is_flag=True, help="Show what would change without modifying the DB")
+@click.option(
+    "--base-dir",
+    default=None,
+    type=click.Path(exists=True, file_okay=False),
+    help="Set/override base directory before migration",
+)
+@click.pass_context
+def migrate_paths(ctx: click.Context, dry_run: bool, base_dir: str | None) -> None:
+    """Convert legacy absolute source paths to relative paths."""
+    db_path = ctx.obj["db_path"]
+
+    if not Path(db_path).exists():
+        click.echo(f"Database not found: {db_path}", err=True)
+        sys.exit(1)
+
+    db = SearchDB(db_path)
+    try:
+        if base_dir is not None:
+            db.set_base_dir(base_dir)
+
+        click.echo(f"Base directory: {db.base_dir}")
+
+        # Get all distinct source values
+        rows = list(db._execute("SELECT DISTINCT source FROM docs"))
+        sources = [row[0] for row in rows]
+
+        if not sources:
+            click.echo("No documents found in database.")
+            return
+
+        absolute = []
+        already_relative = []
+        for src in sources:
+            if Path(src).is_absolute():
+                absolute.append(src)
+            else:
+                already_relative.append(src)
+
+        if not absolute:
+            click.echo(f"All {len(sources)} source(s) are already relative. Nothing to migrate.")
+            return
+
+        # Compute relative paths and detect collisions
+        existing_relative = set(already_relative)
+        migrations: list[tuple[str, str]] = []
+        collisions: list[tuple[str, str]] = []
+        seen_targets: dict[str, str] = {}
+
+        for abs_src in absolute:
+            rel = db.to_relative(abs_src)
+            if rel in existing_relative:
+                collisions.append((abs_src, rel))
+            elif rel in seen_targets:
+                collisions.append((abs_src, rel))
+            else:
+                seen_targets[rel] = abs_src
+                migrations.append((abs_src, rel))
+
+        # Display plan
+        click.echo(f"\nTotal sources: {len(sources)}")
+        click.echo(f"Already relative: {len(already_relative)}")
+        click.echo(f"To convert: {len(migrations)}")
+        click.echo(f"Collisions (skipped): {len(collisions)}")
+
+        if migrations:
+            click.echo("\nConversions:")
+            for abs_src, rel in migrations:
+                click.echo(f"  {abs_src} -> {rel}")
+
+        if collisions:
+            click.echo("\nCollisions (would overwrite existing):")
+            for abs_src, rel in collisions:
+                click.echo(f"  {abs_src} -> {rel} (SKIPPED)")
+
+        if dry_run:
+            click.echo("\n[dry-run] No changes made.")
+            return
+
+        # Apply migrations
+        converted = 0
+        with db._transaction():
+            for abs_src, rel in migrations:
+                db._execute(
+                    "UPDATE docs SET source = ? WHERE source = ?",
+                    (rel, abs_src),
+                )
+                converted += 1
+
+        click.echo(f"\nMigrated {converted} source(s) to relative paths.")
     finally:
         db.close()
 

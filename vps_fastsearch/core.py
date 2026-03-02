@@ -1,5 +1,6 @@
 """Core classes for VPS-FastSearch: Embedder, Reranker, and SearchDB."""
 
+import hashlib
 import logging
 import os
 import re
@@ -16,11 +17,16 @@ import sqlite_vec
 logger = logging.getLogger(__name__)
 
 # Schema version for migration tracking (via PRAGMA user_version)
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Lazy import fastembed to speed up CLI startup
 _embedder_instance = None
 _reranker_instance = None
+
+
+def _content_hash(content: str) -> str:
+    """Compute SHA-256 hex digest for content deduplication."""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +433,28 @@ class SearchDB:
             if current_version < 2:
                 # v1 -> v2: add db_meta table (CREATE IF NOT EXISTS already ran above)
                 logger.info("Migrating database schema v1 -> v2: adding db_meta table")
+            if current_version < 3:
+                # v2 -> v3: add content_hash column
+                logger.info("Migrating database schema -> v3: adding content_hash column")
+                cols = [r[1] for r in self._execute("PRAGMA table_info(docs)")]
+                if "content_hash" not in cols:
+                    self._execute("ALTER TABLE docs ADD COLUMN content_hash TEXT")
+                self._execute(
+                    "CREATE INDEX IF NOT EXISTS idx_docs_content_hash ON docs(content_hash)"
+                )
+                # Backfill content_hash for existing rows
+                rows_to_update = list(
+                    self._execute("SELECT id, content FROM docs WHERE content_hash IS NULL")
+                )
+                if rows_to_update:
+                    logger.info(
+                        "Backfilling content_hash for %d existing rows", len(rows_to_update)
+                    )
+                    for doc_id, content in rows_to_update:
+                        self._execute(
+                            "UPDATE docs SET content_hash = ? WHERE id = ?",
+                            (_content_hash(content), doc_id),
+                        )
             logger.info(
                 f"Updating database schema version from {current_version} to {SCHEMA_VERSION}"
             )
@@ -458,25 +486,49 @@ class SearchDB:
         content: str,
         embedding: list[float],
         metadata: dict[str, Any] | None = None,
+        skip_duplicates: bool = False,
     ) -> int:
         """
         Index a document chunk with its embedding.
 
-        Returns the document ID.
+        Args:
+            skip_duplicates: When True, skip insertion if a row with the same
+                content_hash already exists.  Returns -1 for skipped items.
+
+        Returns the document ID, or -1 if skipped as a duplicate.
         """
         if chunk_index < 0:
             raise ValueError(f"chunk_index must be non-negative, got {chunk_index}")
         if len(embedding) != self.EMBEDDING_DIM:
             raise ValueError(f"Expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}")
+
+        content_hash_val = _content_hash(content)
+
+        if skip_duplicates:
+            existing = list(
+                self._execute(
+                    "SELECT id FROM docs WHERE content_hash = ? LIMIT 1",
+                    (content_hash_val,),
+                )
+            )
+            if existing:
+                return -1
+
         self.conn.execute("BEGIN")
         try:
             # Insert into main docs table (triggers handle FTS)
             self._execute(
                 """
-                INSERT INTO docs (source, chunk_index, content, metadata)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO docs (source, chunk_index, content, metadata, content_hash)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (source, chunk_index, content, orjson.dumps(metadata or {}).decode()),
+                (
+                    source,
+                    chunk_index,
+                    content,
+                    orjson.dumps(metadata or {}).decode(),
+                    content_hash_val,
+                ),
             )
             doc_id = self.conn.last_insert_rowid()
 
@@ -502,12 +554,18 @@ class SearchDB:
     def index_batch(
         self,
         items: list[tuple[str, int, str, list[float], dict[str, Any] | None]],
+        skip_duplicates: bool = False,
     ) -> list[int]:
         """
         Batch index multiple document chunks.
 
         Each item is (source, chunk_index, content, embedding, metadata).
-        Returns list of document IDs.
+
+        Args:
+            skip_duplicates: When True, skip items whose content_hash already
+                exists.  Skipped items get -1 in the returned list.
+
+        Returns list of document IDs (-1 for skipped duplicates).
         """
         for i, (_, chunk_index, _, embedding, _) in enumerate(items):
             if chunk_index < 0:
@@ -517,17 +575,42 @@ class SearchDB:
                     f"Item {i}: expected {self.EMBEDDING_DIM}-dim embedding, got {len(embedding)}"
                 )
 
-        doc_ids = []
+        # Pre-compute hashes
+        hashes = [_content_hash(content) for _, _, content, _, _ in items]
+
+        # Collect existing hashes if dedup is requested
+        existing_hashes: set[str] = set()
+        if skip_duplicates:
+            for h in hashes:
+                rows = list(
+                    self._execute("SELECT 1 FROM docs WHERE content_hash = ? LIMIT 1", (h,))
+                )
+                if rows:
+                    existing_hashes.add(h)
+
+        doc_ids: list[int] = []
 
         self.conn.execute("BEGIN")
         try:
-            for source, chunk_index, content, embedding, metadata in items:
+            for (source, chunk_index, content, embedding, metadata), h in zip(
+                items, hashes, strict=True
+            ):
+                if skip_duplicates and h in existing_hashes:
+                    doc_ids.append(-1)
+                    continue
+
                 self._execute(
                     """
-                    INSERT INTO docs (source, chunk_index, content, metadata)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO docs (source, chunk_index, content, metadata, content_hash)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (source, chunk_index, content, orjson.dumps(metadata or {}).decode()),
+                    (
+                        source,
+                        chunk_index,
+                        content,
+                        orjson.dumps(metadata or {}).decode(),
+                        h,
+                    ),
                 )
                 doc_id = self.conn.last_insert_rowid()
                 doc_ids.append(doc_id)
@@ -919,8 +1002,8 @@ class SearchDB:
         try:
             # Update docs table (trigger handles FTS delete-old + insert-new)
             self._execute(
-                "UPDATE docs SET content = ? WHERE id = ?",
-                (content, doc_id),
+                "UPDATE docs SET content = ?, content_hash = ? WHERE id = ?",
+                (content, _content_hash(content), doc_id),
             )
             affected = self.conn.changes()
             if affected == 0:
@@ -1023,6 +1106,10 @@ class SearchDB:
     def set_base_dir(self, directory: str | Path) -> None:
         """Persist a custom base directory for relative path resolution."""
         self.set_meta("base_dir", str(Path(directory).resolve()))
+
+    def is_within_base_dir(self, path: str | Path) -> bool:
+        """Check whether *path* (resolved) is within :attr:`base_dir`."""
+        return Path(path).resolve().is_relative_to(self.base_dir.resolve())
 
     def to_relative(self, abs_path: str | Path) -> str:
         """Convert an absolute path to a path relative to *base_dir*.

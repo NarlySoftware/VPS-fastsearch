@@ -315,10 +315,10 @@ def test_index_with_relative_source_and_search(db) -> None:
     assert Path(resolved).resolve() == abs_file.resolve()
 
 
-def test_schema_version_updated_to_2(db) -> None:
-    """Schema version should be 2 after init (db_meta table addition)."""
+def test_schema_version_updated_to_3(db) -> None:
+    """Schema version should be 3 after init (content_hash column addition)."""
     row = list(db._execute("PRAGMA user_version"))
-    assert row[0][0] == 2
+    assert row[0][0] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -610,3 +610,279 @@ def test_metadata_filter_invalid_value_type(db_with_metadata) -> None:
             limit=10,
             metadata_filter={"author": ["alice"]},
         )
+
+
+# ---------------------------------------------------------------------------
+# is_within_base_dir tests (Fix #5)
+# ---------------------------------------------------------------------------
+
+
+def test_is_within_base_dir_inside(db) -> None:
+    """is_within_base_dir returns True for paths inside base_dir."""
+    db.set_base_dir(str(db.db_path.parent))
+    inside = db.db_path.parent / "subdir" / "file.md"
+    assert db.is_within_base_dir(inside) is True
+
+
+def test_is_within_base_dir_outside(db) -> None:
+    """is_within_base_dir returns False for paths outside base_dir."""
+    db.set_base_dir(str(db.db_path.parent))
+    assert db.is_within_base_dir("/completely/different/path.md") is False
+
+
+def test_is_within_base_dir_exact_match(db) -> None:
+    """is_within_base_dir returns True for base_dir itself."""
+    db.set_base_dir(str(db.db_path.parent))
+    assert db.is_within_base_dir(db.db_path.parent) is True
+
+
+def test_is_within_base_dir_default_home(db) -> None:
+    """is_within_base_dir uses home dir when no custom base_dir is set."""
+    home_file = Path.home() / "somefile.md"
+    assert db.is_within_base_dir(home_file) is True
+
+
+# ---------------------------------------------------------------------------
+# content_hash tests (Fix #6)
+# ---------------------------------------------------------------------------
+
+
+def test_content_hash_stored_on_add(db) -> None:
+    """index_document should store a content_hash."""
+    emb = DUMMY_EMBEDDING
+    doc_id = db.index_document("hash.md", 0, "Hash test content", emb)
+    row = list(db._execute("SELECT content_hash FROM docs WHERE id = ?", (doc_id,)))
+    assert row[0][0] is not None
+    assert len(row[0][0]) == 64  # SHA-256 hex
+
+
+def test_content_hash_updates_on_update_content(db) -> None:
+    """update_content should recompute content_hash."""
+    emb = DUMMY_EMBEDDING
+    doc_id = db.index_document("hash.md", 0, "Original content", emb)
+    old_hash = list(db._execute("SELECT content_hash FROM docs WHERE id = ?", (doc_id,)))[0][0]
+
+    db.update_content(doc_id, "Updated content", emb)
+    new_hash = list(db._execute("SELECT content_hash FROM docs WHERE id = ?", (doc_id,)))[0][0]
+
+    assert old_hash != new_hash
+    assert len(new_hash) == 64
+
+
+def test_skip_duplicates_skips_identical(db) -> None:
+    """index_document with skip_duplicates=True should skip identical content."""
+    emb = DUMMY_EMBEDDING
+    id1 = db.index_document("a.md", 0, "Identical content", emb, skip_duplicates=True)
+    id2 = db.index_document("b.md", 0, "Identical content", emb, skip_duplicates=True)
+
+    assert id1 > 0
+    assert id2 == -1
+    assert db.get_stats()["total_chunks"] == 1
+
+
+def test_skip_duplicates_false_allows_duplicates(db) -> None:
+    """index_document with skip_duplicates=False should allow duplicate content."""
+    emb = DUMMY_EMBEDDING
+    id1 = db.index_document("a.md", 0, "Same content", emb, skip_duplicates=False)
+    id2 = db.index_document("b.md", 0, "Same content", emb, skip_duplicates=False)
+
+    assert id1 > 0
+    assert id2 > 0
+    assert db.get_stats()["total_chunks"] == 2
+
+
+def test_batch_skip_duplicates(db) -> None:
+    """index_batch with skip_duplicates=True should skip existing content."""
+    emb = DUMMY_EMBEDDING
+    db.index_document("existing.md", 0, "Already here", emb)
+
+    items = [
+        ("new.md", 0, "Brand new content", emb, None),
+        ("dup.md", 0, "Already here", emb, None),
+    ]
+    ids = db.index_batch(items, skip_duplicates=True)
+
+    assert ids[0] > 0
+    assert ids[1] == -1
+    assert db.get_stats()["total_chunks"] == 2  # existing + new, not dup
+
+
+def test_content_hash_batch_stored(db) -> None:
+    """index_batch should store content_hash for all items."""
+    emb = DUMMY_EMBEDDING
+    items = [
+        ("a.md", 0, "Content A", emb, None),
+        ("b.md", 0, "Content B", emb, None),
+    ]
+    ids = db.index_batch(items)
+    for doc_id in ids:
+        row = list(db._execute("SELECT content_hash FROM docs WHERE id = ?", (doc_id,)))
+        assert row[0][0] is not None
+        assert len(row[0][0]) == 64
+
+
+# ---------------------------------------------------------------------------
+# migrate-paths CLI tests (Fix #4)
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_paths_basic(db) -> None:
+    """migrate-paths should convert absolute sources to relative."""
+    db.set_base_dir(str(db.db_path.parent))
+    base = db.db_path.parent
+    abs_source = str(base / "docs" / "readme.md")
+    db.index_document(abs_source, 0, "Migrate test", DUMMY_EMBEDDING)
+
+    # Verify it's absolute
+    sources = [r[0] for r in db._execute("SELECT DISTINCT source FROM docs")]
+    assert Path(sources[0]).is_absolute()
+
+    # Simulate migration logic (same as CLI command)
+    abs_sources = [s for s in sources if Path(s).is_absolute()]
+    for src in abs_sources:
+        rel = db.to_relative(src)
+        db._execute("UPDATE docs SET source = ? WHERE source = ?", (rel, src))
+
+    # Verify it's now relative
+    new_sources = [r[0] for r in db._execute("SELECT DISTINCT source FROM docs")]
+    assert not Path(new_sources[0]).is_absolute()
+    assert new_sources[0] == str(Path("docs") / "readme.md")
+
+
+def test_migrate_paths_collision_detection(db) -> None:
+    """migrate-paths should detect collisions with existing relative sources."""
+    db.set_base_dir(str(db.db_path.parent))
+    base = db.db_path.parent
+
+    # Insert a relative source and an absolute that would collide
+    db.index_document("docs/readme.md", 0, "Relative one", DUMMY_EMBEDDING)
+    abs_source = str(base / "docs" / "readme.md")
+    db.index_document(abs_source, 1, "Absolute one", DUMMY_EMBEDDING)
+
+    # Gather sources
+    sources = [r[0] for r in db._execute("SELECT DISTINCT source FROM docs")]
+    absolute = [s for s in sources if Path(s).is_absolute()]
+    already_relative = [s for s in sources if not Path(s).is_absolute()]
+    existing_relative = set(already_relative)
+
+    collisions = []
+    for abs_src in absolute:
+        rel = db.to_relative(abs_src)
+        if rel in existing_relative:
+            collisions.append((abs_src, rel))
+
+    assert len(collisions) == 1
+    assert collisions[0][1] == "docs/readme.md"
+
+
+def test_migrate_paths_already_relative(db) -> None:
+    """migrate-paths should report already-relative sources and skip them."""
+    db.index_document("relative/path.md", 0, "Already relative", DUMMY_EMBEDDING)
+
+    sources = [r[0] for r in db._execute("SELECT DISTINCT source FROM docs")]
+    absolute = [s for s in sources if Path(s).is_absolute()]
+    assert len(absolute) == 0  # Nothing to migrate
+
+
+def test_schema_v2_to_v3_migration(tmp_path) -> None:
+    """Opening a v2 database should auto-migrate to v3 with content_hash."""
+    import apsw
+    import sqlite_vec as sv
+
+    db_path = tmp_path / "legacy.db"
+    # Create a v2-style database manually (with all triggers for FTS sync)
+    conn = apsw.Connection(str(db_path))
+    conn.enableloadextension(True)
+    conn.loadextension(sv.loadable_path())
+    conn.enableloadextension(False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("""
+        CREATE TABLE docs (
+            id INTEGER PRIMARY KEY,
+            source TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            metadata JSON,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX idx_docs_source ON docs(source)")
+    conn.execute(
+        "CREATE UNIQUE INDEX idx_docs_source_chunk ON docs(source, chunk_index)"
+    )
+    conn.execute("""
+        CREATE VIRTUAL TABLE docs_fts USING fts5(
+            content, content='docs', content_rowid='id',
+            tokenize='porter unicode61'
+        )
+    """)
+    conn.execute("""
+        CREATE TRIGGER docs_ai AFTER INSERT ON docs BEGIN
+            INSERT INTO docs_fts(rowid, content) VALUES (new.id, new.content);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER docs_ad AFTER DELETE ON docs BEGIN
+            INSERT INTO docs_fts(docs_fts, rowid, content)
+                VALUES('delete', old.id, old.content);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER docs_au AFTER UPDATE ON docs BEGIN
+            INSERT INTO docs_fts(docs_fts, rowid, content)
+                VALUES('delete', old.id, old.content);
+            INSERT INTO docs_fts(rowid, content) VALUES (new.id, new.content);
+        END
+    """)
+    conn.execute("""
+        CREATE VIRTUAL TABLE docs_vec USING vec0(
+            id INTEGER PRIMARY KEY, embedding float32[768]
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE db_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)
+    """)
+    # Insert a row WITHOUT content_hash column
+    conn.execute(
+        "INSERT INTO docs (source, chunk_index, content, metadata) VALUES (?, ?, ?, ?)",
+        ("old.md", 0, "Legacy content", "{}"),
+    )
+    # Manually sync FTS for this row
+    conn.execute("PRAGMA user_version = 2")
+    conn.close()
+
+    # Open with SearchDB — should trigger v2→v3 migration
+    db = SearchDB(db_path)
+    try:
+        # Schema version should be 3
+        row = list(db._execute("PRAGMA user_version"))
+        assert row[0][0] == 3
+
+        # content_hash column should exist and be backfilled
+        result = list(db._execute("SELECT content_hash FROM docs WHERE id = 1"))
+        assert result[0][0] is not None
+        assert len(result[0][0]) == 64  # SHA-256 hex
+    finally:
+        db.close()
+
+
+def test_cross_base_dir_migration(db) -> None:
+    """Sources indexed with one base_dir should resolve correctly after migration."""
+    db.set_base_dir(str(db.db_path.parent))
+    base = db.db_path.parent
+    abs_source = str(base / "project" / "notes.md")
+    db.index_document(abs_source, 0, "Cross-host content", DUMMY_EMBEDDING)
+
+    # Migrate to relative
+    rel = db.to_relative(abs_source)
+    db._execute("UPDATE docs SET source = ? WHERE source = ?", (rel, abs_source))
+
+    # Change base_dir (simulating different machine)
+    new_base = db.db_path.parent / "other_root"
+    new_base.mkdir()
+    db.set_base_dir(str(new_base))
+
+    # Resolve — should use new base_dir
+    sources = [r[0] for r in db._execute("SELECT source FROM docs")]
+    resolved = db.to_absolute(sources[0])
+    assert str(new_base) in resolved
