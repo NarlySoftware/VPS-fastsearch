@@ -194,6 +194,95 @@ sudo systemctl reload fastsearch
 
 ---
 
+## Scheduled Indexing
+
+VPS-FastSearch includes systemd timer units for automated indexing. These are the
+**only** supported scheduling mechanism — do not use crontab or other schedulers
+to avoid duplicate indexing.
+
+### Timer/Service Units
+
+The repo root contains four unit files:
+
+| File | Purpose |
+|------|---------|
+| `fastsearch-index-incremental.service` | Oneshot: runs indexer in `--mode incremental` |
+| `fastsearch-index-incremental.timer` | Triggers incremental every 15 minutes (+ 3 min after boot) |
+| `fastsearch-index-full.service` | Oneshot: runs indexer in `--mode full` |
+| `fastsearch-index-full.timer` | Triggers full reindex nightly at 02:17 |
+
+### User-Level Installation
+
+For user-level deployments (e.g., `~/.config/systemd/user/`):
+
+```bash
+# Copy timer and service units
+cp fastsearch-index-*.service fastsearch-index-*.timer \
+   ~/.config/systemd/user/
+
+# Edit the service files to set correct paths:
+#   ExecStart= — path to your Python and indexer script
+#   FASTSEARCH_DB= — path to your database
+#   FASTSEARCH_CONFIG= — path to your config file
+
+# Reload and enable
+systemctl --user daemon-reload
+systemctl --user enable --now fastsearch-index-incremental.timer
+systemctl --user enable --now fastsearch-index-full.timer
+
+# Verify timers are active
+systemctl --user list-timers
+```
+
+### System-Level Installation
+
+For system-level deployments (dedicated `fastsearch` user):
+
+```bash
+# Copy to system directory
+sudo cp fastsearch-index-*.service fastsearch-index-*.timer \
+   /etc/systemd/system/
+
+# Edit service files: set User=, ExecStart=, Environment= paths
+sudo systemctl daemon-reload
+sudo systemctl enable --now fastsearch-index-incremental.timer
+sudo systemctl enable --now fastsearch-index-full.timer
+```
+
+### Monitoring
+
+```bash
+# Check timer schedule and last run
+systemctl --user list-timers
+
+# View indexer logs
+journalctl --user -u fastsearch-index-incremental.service
+journalctl --user -u fastsearch-index-full.service
+
+# Manually trigger an incremental run
+systemctl --user start fastsearch-index-incremental.service
+```
+
+### Indexer Script
+
+The service units expect an indexer script (see `examples/incremental_indexer.py`
+for a generic version). The script should:
+
+1. Discover files to index (by glob pattern or explicit list)
+2. Track modification times to skip unchanged files
+3. Call `vps-fastsearch index <file> --reindex` for changed files
+4. Call `vps-fastsearch delete --source <file>` for removed files
+
+### Important
+
+- **Use systemd timers only** — do not add crontab entries or other schedulers
+  for FastSearch indexing. Duplicate scheduling causes redundant work and
+  potential race conditions.
+- The timer services have `After=vps-fastsearch.service` to ensure the daemon
+  is running before indexing starts.
+
+---
+
 ## Pre-Download Models
 
 Models are downloaded on first use. For faster deployments, pre-download:
