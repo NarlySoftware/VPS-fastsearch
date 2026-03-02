@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-03-01
+
+### Added
+- **`migrate-paths` CLI command**: Bulk-convert legacy absolute source paths to relative paths with `--dry-run` mode, `--base-dir` override, and collision detection
+- **`--strict` flag on `index` command**: Opt-in portable mode that rejects files outside `base_dir`, preventing non-portable `../../` paths
+- **`is_within_base_dir()` method**: Check whether a path falls within the configured base directory
+- **Content hash deduplication**: SHA-256 `content_hash` column on `docs` table for integrity checking and optional dedup via `skip_duplicates` parameter on `index_document()` and `index_batch()`
+- **CLI smoke tests**: New `tests/test_cli.py` with CliRunner tests for `--version`, `--help`, and `migrate-paths` scenarios
+- **Schema v2→v3 migration test**: Regression test creating a real v2 database and verifying automatic upgrade
+- **Cross-host migration test**: Validates path portability across different `base_dir` settings
+- **Wheel smoke CI job**: Builds wheel, installs from it, and verifies CLI and imports work
+
+### Changed
+- **Database schema version 3**: Auto-migrates from v2 on first open; adds `content_hash` column and backfills existing rows with SHA-256 hashes
+- **CI workflow**: Added `vps-fastsearch --version` and `--help` smoke test step
+
+### Stats
+- 231 unit tests (up from 208)
+- Deployed and verified on Debian 13 VM (eva@100.123.195.35)
+
 ## [0.3.0] - 2026-02-27
 
 ### Changed
