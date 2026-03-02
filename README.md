@@ -44,7 +44,7 @@ cd VPS-fastsearch
 pip install -e ".[all]"
 ```
 
-See [INSTALL_GUIDE.md](INSTALL_GUIDE.md) for the full setup walkthrough.
+See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full setup walkthrough.
 
 ### Index Documents
 

@@ -599,4 +599,4 @@ Tested on 4-core AMD EPYC 9354P, 16GB RAM, no GPU:
 - [VPS-FastSearch README](../README.md)
 - [CLI Reference](CLI.md)
 - [API Reference](API.md)
-- [Performance Tuning](Performance.md)
+- [Performance Tuning](PERFORMANCE.md)
