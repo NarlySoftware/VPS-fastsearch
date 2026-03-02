@@ -50,7 +50,7 @@ OpenClaw's default memory search (QMD) spawns a fresh process per query, loading
 - Python 3.10+
 - `python3-venv` package (`sudo apt install python3-venv` or `python3.XX-venv`)
 - OpenClaw installed and running
-- **VPS-FastSearch >= 0.2.1** (includes critical memory and FTS5 fixes)
+- **VPS-FastSearch >= 0.3.0** (includes critical memory and FTS5 fixes)
 
 ## Installation
 
@@ -70,7 +70,7 @@ Verify installation:
 
 ```bash
 ~/.openclaw/fastsearch-venv/bin/vps-fastsearch --version
-# Should show: vps-fastsearch 0.2.1 or higher
+# Should show: vps-fastsearch 0.3.1 or higher
 ```
 
 ### 3. Create the QMD-compatible wrapper
@@ -574,12 +574,12 @@ Tested on 4-core AMD EPYC 9354P, 16GB RAM, no GPU:
 - Re-index: `vps-fastsearch --db ~/.cache/fastsearch/index.db index ~/.openclaw/workspace/memory --glob "*.md"`
 
 ### Daemon using too much memory (>1GB)
-- Ensure VPS-FastSearch >= 0.2.1 with the `threads=2` fix
+- Ensure VPS-FastSearch >= 0.3.0 with the `threads=2` fix
 - Without this fix, ONNX arena allocates ~4GB; with it, stays at ~480MB
 - Upgrade: `pip install --upgrade git+https://github.com/NarlySoftware/VPS-fastsearch.git`
 
 ### Hyphens in searches cause errors
-- Ensure VPS-FastSearch >= 0.2.1 with FTS5 query sanitization
+- Ensure VPS-FastSearch >= 0.3.0 with FTS5 query sanitization
 - Hyphens like "node-llama-cpp" are now properly quoted for FTS5
 
 ### OpenClaw timeout errors
