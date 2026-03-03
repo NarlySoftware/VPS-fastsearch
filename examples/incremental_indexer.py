@@ -17,7 +17,7 @@ Usage:
 
     # Custom CLI path and state file location
     python incremental_indexer.py --workspace ~/my-project --glob "*.md" \
-        --cli ~/venv/bin/vps-fastsearch \
+        --cli ~/fastsearch/.venv/bin/vps-fastsearch \
         --state-file ~/.cache/fastsearch/index_state.json
 """
 
