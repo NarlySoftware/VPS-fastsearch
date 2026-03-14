@@ -39,8 +39,8 @@ If you have the VPS-FastSearch tarball instead of using git:
 
 ```bash
 cd ~
-tar xzf vps-fastsearch-0.3.1.tar.gz
-mv vps-fastsearch-0.3.1 fastsearch
+tar xzf vps-fastsearch-0.3.2.tar.gz
+mv vps-fastsearch-0.3.2 fastsearch
 cd ~/fastsearch
 chmod +x install.sh
 ./install.sh

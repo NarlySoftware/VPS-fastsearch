@@ -654,7 +654,7 @@ def generate_report(suite: TestSuite):
     </div>
     
     <footer>
-        FastSearch v0.3.1 | Benchmark run on {suite.start_time.strftime("%Y-%m-%d")}
+        FastSearch v0.3.2 | Benchmark run on {suite.start_time.strftime("%Y-%m-%d")}
     </footer>
 </body>
 </html>

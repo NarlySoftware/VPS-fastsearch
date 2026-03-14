@@ -60,7 +60,7 @@ model loading).
 
 ```
 vps_fastsearch/
-    __init__.py       # Package exports, version (0.3.1)
+    __init__.py       # Package exports, version (0.3.2)
     __main__.py       # python -m vps_fastsearch entry point
     cli.py            # Click CLI commands
     core.py           # Embedder, Reranker, SearchDB

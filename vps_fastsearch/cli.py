@@ -1134,14 +1134,67 @@ def _save_collections(db: SearchDB, collections: list[dict[str, str]]) -> None:
     db.set_meta(_COLLECTIONS_META_KEY, orjson.dumps(collections).decode())
 
 
+def _qmd_init_schema(db: SearchDB) -> None:
+    """Create QMD-specific tables if they don't exist.
+
+    Called from QMD command handlers before first use. Does not affect
+    databases used only via direct CLI or Python client.
+    """
+    db._execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            collection  TEXT NOT NULL,
+            path        TEXT NOT NULL,
+            hash        TEXT,
+            active      INTEGER NOT NULL DEFAULT 1,
+            indexed_at  INTEGER,
+            UNIQUE(collection, path)
+        )
+    """)
+
+
+def _qmd_get_snippet(db: SearchDB, query_text: str, doc_id: int, mode: str) -> str:
+    """Get a snippet for a search result using FTS5 snippet() when possible.
+
+    For BM25/hybrid modes, uses FTS5 snippet() to highlight matching terms.
+    For pure vector mode, falls back to first 200 chars of content.
+    """
+    if mode in ("bm25", "hybrid"):
+        import re
+
+        tokens = re.findall(r"\w+", query_text)
+        if tokens:
+            fts_query = " OR ".join(f'"{t}"' for t in tokens)
+            try:
+                rows = list(db._execute(
+                    """
+                    SELECT snippet(docs_fts, 0, '**', '**', '...', 12)
+                    FROM docs_fts
+                    WHERE docs_fts MATCH ? AND rowid = ?
+                    """,
+                    (fts_query, doc_id),
+                ))
+                if rows and rows[0][0]:
+                    return str(rows[0][0])
+            except Exception:
+                pass
+
+    # Fallback: first 200 chars of content
+    rows = list(db._execute("SELECT content FROM docs WHERE id = ?", (doc_id,)))
+    if rows:
+        content = rows[0][0]
+        return str(content[:200])
+    return ""
+
+
 def _qmd_search(
     ctx: click.Context,
     query_text: str,
     limit: int,
     collection: str | None,
     mode: str,
+    rerank: bool = False,
 ) -> None:
-    """Shared implementation for QMD search commands (query, search, vector_search)."""
+    """Shared implementation for QMD search commands."""
     db_path = ctx.obj["db_path"]
     config_path = ctx.obj.get("config_path")
 
@@ -1169,6 +1222,7 @@ def _qmd_search(
                     db_path=db_path,
                     limit=limit,
                     mode=mode,
+                    rerank=rerank,
                     metadata_filter=metadata_filter,
                 )
                 results = result.get("results", [])
@@ -1177,7 +1231,7 @@ def _qmd_search(
                 client = None
         else:
             if not Path(db_path).exists():
-                click.echo("no results found.", err=True)
+                click.echo("no results found.")
                 return
             db = SearchDB(db_path)
             try:
@@ -1185,13 +1239,30 @@ def _qmd_search(
                     results = db.search_bm25(
                         query_text, limit=limit, metadata_filter=metadata_filter
                     )
+                elif mode == "hybrid" and rerank:
+                    embedder = _get_embedder(config_path)
+                    embedding = embedder.embed_single(query_text)
+                    try:
+                        results = db.search_hybrid_reranked(
+                            query_text,
+                            embedding,
+                            limit=limit,
+                            rerank_top_k=min(limit * 3, 100),
+                            metadata_filter=metadata_filter,
+                        )
+                    except ImportError:
+                        # Reranker not installed — fall back to hybrid without rerank
+                        results = db.search_hybrid(
+                            query_text, embedding, limit=limit,
+                            metadata_filter=metadata_filter,
+                        )
                 elif mode == "vector":
                     embedder = _get_embedder(config_path)
                     embedding = embedder.embed_single(query_text)
                     results = db.search_vector(
                         embedding, limit=limit, metadata_filter=metadata_filter
                     )
-                else:  # hybrid
+                else:  # hybrid without rerank
                     embedder = _get_embedder(config_path)
                     embedding = embedder.embed_single(query_text)
                     results = db.search_hybrid(
@@ -1207,15 +1278,16 @@ def _qmd_search(
         click.echo("no results found.")
         return
 
-    # Load collections for path resolution
+    # Load collections and generate snippets
     collections: list[dict[str, str]] = []
+    snippets: dict[int, str] = {}
     if Path(db_path).exists():
         _db = SearchDB(db_path)
         try:
             collections = _load_collections(_db)
-            # Resolve source paths to absolute
             for r in results:
                 r["_abs_source"] = _db.to_absolute(r["source"])
+                snippets[r["id"]] = _qmd_get_snippet(_db, query_text, r["id"], mode)
         finally:
             _db.close()
     else:
@@ -1225,12 +1297,24 @@ def _qmd_search(
     # Format as QMD JSON output
     qmd_results: list[dict[str, Any]] = []
     for r in results:
-        score = r.get("rrf_score", r.get("score", 0.0))
-        if "distance" in r:
-            # Convert cosine distance to similarity score (1 - distance)
-            score = max(0.0, 1.0 - r["distance"])
+        # Normalize score to 0-1
+        if rerank and "rerank_score" in r:
+            # Cross-encoder scores are typically -10 to +10; sigmoid normalize
+            import math
 
-        # Resolve file path: relative to collection root if possible, else absolute
+            raw = float(r["rerank_score"])
+            score = 1.0 / (1.0 + math.exp(-raw))
+        elif "rrf_score" in r:
+            # RRF scores are small positives; scale relative to top result
+            score = float(r["rrf_score"])
+        elif "score" in r:
+            score = float(r["score"])
+        elif "distance" in r:
+            score = max(0.0, 1.0 - float(r["distance"]))
+        else:
+            score = 0.0
+
+        # Resolve file path relative to collection root
         abs_path = Path(r["_abs_source"])
         file_path = str(abs_path)
         result_collection = r.get("metadata", {}).get("collection", collection or "")
@@ -1245,12 +1329,18 @@ def _qmd_search(
             except ValueError:
                 continue
 
+        # Build docid: <collection>/<path>:<chunk_index>
+        chunk_idx = r.get("chunk_index", 0)
+        docid = f"{result_collection}/{file_path}:{chunk_idx}" if result_collection else file_path
+
+        snippet = snippets.get(r["id"], r.get("content", "")[:200])
+
         qmd_results.append({
             "file": file_path,
             "collection": result_collection,
-            "docid": str(r["id"]),
-            "score": round(float(score), 6),
-            "snippet": r["content"][:500],
+            "docid": docid,
+            "score": round(score, 6),
+            "snippet": snippet,
         })
 
     click.echo(orjson.dumps(qmd_results, option=orjson.OPT_INDENT_2).decode())
@@ -1267,6 +1357,19 @@ def qmd_query(
 ) -> None:
     """BM25/keyword search (QMD protocol)."""
     _qmd_search(ctx, query_text, limit, collection, mode="bm25")
+
+
+@cli.command("vsearch")
+@click.argument("query_text")
+@click.option("-n", "limit", default=10, help="Number of results")
+@click.option("-c", "collection", default=None, help="Collection name filter")
+@click.option("--json", "output_json", is_flag=True, hidden=True, help="JSON output (always on)")
+@click.pass_context
+def qmd_vsearch(
+    ctx: click.Context, query_text: str, limit: int, collection: str | None, output_json: bool
+) -> None:
+    """Hybrid search with cross-encoder reranking (QMD protocol)."""
+    _qmd_search(ctx, query_text, limit, collection, mode="hybrid", rerank=True)
 
 
 @cli.command("vector_search")
@@ -1286,14 +1389,16 @@ def qmd_vector_search(
 @click.pass_context
 def qmd_update(ctx: click.Context) -> None:
     """Reindex all registered collections (QMD protocol)."""
+    import hashlib
+
     db_path = ctx.obj["db_path"]
 
     if not Path(db_path).exists():
-        # No DB yet — nothing to update
         return
 
     db = SearchDB(db_path)
     try:
+        _qmd_init_schema(db)
         collections = _load_collections(db)
     finally:
         db.close()
@@ -1319,6 +1424,22 @@ def qmd_update(ctx: click.Context) -> None:
             except Exception:
                 continue
 
+            # Change detection: skip unchanged files
+            file_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            rel_path = str(file_path.relative_to(coll_path))
+
+            db = SearchDB(db_path)
+            try:
+                _qmd_init_schema(db)
+                rows = list(db._execute(
+                    "SELECT hash FROM documents WHERE collection = ? AND path = ?",
+                    (name, rel_path),
+                ))
+                if rows and rows[0][0] == file_hash:
+                    continue  # Unchanged — skip
+            finally:
+                db.close()
+
             if file_path.suffix.lower() == ".md":
                 chunks = list(chunk_markdown(content))
             else:
@@ -1327,7 +1448,7 @@ def qmd_update(ctx: click.Context) -> None:
             if not chunks:
                 continue
 
-            # Use daemon if available, else direct
+            # Embed: daemon if available, else direct
             try:
                 client = FastSearchClient(config_path=ctx.obj.get("config_path"), timeout=60.0)
                 try:
@@ -1352,8 +1473,10 @@ def qmd_update(ctx: click.Context) -> None:
                     batch = texts[batch_start : batch_start + EMBED_BATCH_SIZE]
                     embeddings.extend(embedder.embed(batch))
 
+            # Index chunks and update documents table
             db = SearchDB(db_path)
             try:
+                _qmd_init_schema(db)
                 source = db.to_relative(file_path.resolve())
                 items: list[tuple[str, int, str, list[float], dict[str, Any] | None]] = []
                 for i, ((text, metadata), embedding) in enumerate(
@@ -1363,6 +1486,18 @@ def qmd_update(ctx: click.Context) -> None:
                     meta["collection"] = name
                     items.append((source, i, text, embedding, meta))
                 db.index_batch(items)
+
+                # Upsert into documents table
+                now = int(time.time())
+                db._execute(
+                    """
+                    INSERT INTO documents (collection, path, hash, active, indexed_at)
+                    VALUES (?, ?, ?, 1, ?)
+                    ON CONFLICT(collection, path) DO UPDATE SET
+                        hash = excluded.hash, active = 1, indexed_at = excluded.indexed_at
+                    """,
+                    (name, rel_path, file_hash, now),
+                )
             finally:
                 db.close()
 
@@ -1394,12 +1529,11 @@ def collection_add(ctx: click.Context, path: str, name: str, mask: str) -> None:
     """Register a collection path for QMD indexing."""
     db_path = ctx.obj["db_path"]
 
-    # Ensure DB exists
     db = SearchDB(db_path)
     try:
+        _qmd_init_schema(db)
         collections = _load_collections(db)
 
-        # Check if name already exists
         for coll in collections:
             if coll["name"] == name:
                 click.echo(f"Collection '{name}' already exists", err=True)
@@ -1425,12 +1559,19 @@ def collection_remove(ctx: click.Context, name: str) -> None:
 
     db = SearchDB(db_path)
     try:
+        _qmd_init_schema(db)
         collections = _load_collections(db)
         new_collections = [c for c in collections if c["name"] != name]
 
         if len(new_collections) == len(collections):
             click.echo(f"Collection '{name}' does not exist", err=True)
             sys.exit(1)
+
+        # Soft-delete documents for this collection
+        db._execute(
+            "UPDATE documents SET active = 0 WHERE collection = ?",
+            (name,),
+        )
 
         _save_collections(db, new_collections)
         click.echo(f"Removed collection '{name}'")
