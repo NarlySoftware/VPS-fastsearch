@@ -1,10 +1,15 @@
 """VPS-FastSearch client library for connecting to the daemon."""
 
+from __future__ import annotations
+
 import json
 import logging
 import os
 import socket
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .core import Embedder
 
 from .config import DEFAULT_DB_PATH, DEFAULT_SOCKET_PATH, load_config
 
@@ -474,7 +479,7 @@ class FastSearchClient:
         """Close the client connection."""
         self._disconnect()
 
-    def __enter__(self) -> "FastSearchClient":
+    def __enter__(self) -> FastSearchClient:
         return self
 
     def __exit__(self, *args: Any) -> None:
@@ -496,6 +501,21 @@ class FastSearchClient:
             return False
 
 
+def _get_embedder_with_config() -> Embedder:
+    """Get embedder singleton with instruction prefixes loaded from config."""
+    from .core import Embedder
+
+    config = load_config()
+    embedder_config = config.models.get("embedder")
+    if embedder_config:
+        return Embedder.get_instance(
+            model_name=embedder_config.name or None,
+            document_prefix=embedder_config.document_prefix,
+            query_prefix=embedder_config.query_prefix,
+        )
+    return Embedder.get_instance()
+
+
 # Convenience functions for quick usage
 def search(query: str, **kwargs: Any) -> list[Any]:
     """Quick search using daemon (falls back to direct if unavailable)."""
@@ -505,7 +525,7 @@ def search(query: str, **kwargs: Any) -> list[Any]:
             return list(result.get("results", []))
     except (DaemonNotRunningError, FastSearchError):
         # Fall back to direct search
-        from .core import SearchDB, get_embedder
+        from .core import SearchDB
 
         db_path = kwargs.get("db_path", os.environ.get("FASTSEARCH_DB", DEFAULT_DB_PATH))
         limit = kwargs.get("limit", 10)
@@ -519,7 +539,7 @@ def search(query: str, **kwargs: Any) -> list[Any]:
             if mode == "bm25":
                 search_results = db.search_bm25(query, limit=limit, metadata_filter=metadata_filter)
             else:
-                embedder = get_embedder()
+                embedder = _get_embedder_with_config()
                 embedding = embedder.embed_single(query)
                 if rerank:
                     search_results = db.search_hybrid_reranked(
@@ -542,7 +562,5 @@ def embed(texts: list[str]) -> list[list[float]]:
             result = client.embed(texts)
             return list(result.get("embeddings", []))
     except (DaemonNotRunningError, FastSearchError):
-        from .core import get_embedder
-
-        embedder = get_embedder()
+        embedder = _get_embedder_with_config()
         return embedder.embed(texts)

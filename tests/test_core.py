@@ -866,6 +866,108 @@ def test_schema_v2_to_v3_migration(tmp_path) -> None:
         db.close()
 
 
+# ---------------------------------------------------------------------------
+# Embedder prefix tests (#15) — uses mocked FastEmbed
+# ---------------------------------------------------------------------------
+
+
+def test_embedder_stores_prefixes() -> None:
+    """Embedder should store document and query prefixes."""
+    from unittest.mock import MagicMock, patch
+
+    import numpy as np
+
+    with patch("vps_fastsearch.core.Embedder.__init__", return_value=None):
+        from vps_fastsearch.core import Embedder
+
+        e = Embedder.__new__(Embedder)
+        e.model_name = "test"
+        e.document_prefix = "Doc: "
+        e.query_prefix = "Query: "
+        e._model = MagicMock()
+        e._model.embed.return_value = [np.array([0.1] * 768)]
+
+        # embed() should prepend document prefix
+        e.embed(["hello"])
+        e._model.embed.assert_called_with(["Doc: hello"])
+
+        # embed_query() should prepend query prefix
+        e._model.embed.reset_mock()
+        e._model.embed.return_value = [np.array([0.1] * 768)]
+        e.embed_query("hello")
+        e._model.embed.assert_called_with(["Query: hello"])
+
+
+def test_embedder_empty_prefix_no_prepend() -> None:
+    """Embedder with empty prefixes should not modify texts."""
+    from unittest.mock import MagicMock, patch
+
+    import numpy as np
+
+    with patch("vps_fastsearch.core.Embedder.__init__", return_value=None):
+        from vps_fastsearch.core import Embedder
+
+        e = Embedder.__new__(Embedder)
+        e.model_name = "test"
+        e.document_prefix = ""
+        e.query_prefix = ""
+        e._model = MagicMock()
+        e._model.embed.return_value = [np.array([0.1] * 768)]
+
+        # embed() should pass texts unchanged
+        e.embed(["hello"])
+        e._model.embed.assert_called_with(["hello"])
+
+        # embed_query() should pass text unchanged
+        e._model.embed.reset_mock()
+        e._model.embed.return_value = [np.array([0.1] * 768)]
+        e.embed_query("hello")
+        e._model.embed.assert_called_with(["hello"])
+
+
+def test_embed_single_delegates_to_embed_query() -> None:
+    """embed_single should use embed_query (query prefix), not embed (document prefix)."""
+    from unittest.mock import MagicMock, patch
+
+    import numpy as np
+
+    with patch("vps_fastsearch.core.Embedder.__init__", return_value=None):
+        from vps_fastsearch.core import Embedder
+
+        e = Embedder.__new__(Embedder)
+        e.model_name = "test"
+        e.document_prefix = "WRONG: "
+        e.query_prefix = "RIGHT: "
+        e._model = MagicMock()
+        e._model.embed.return_value = [np.array([0.1] * 768)]
+
+        e.embed_single("test query")
+        e._model.embed.assert_called_with(["RIGHT: test query"])
+
+
+# ---------------------------------------------------------------------------
+# Embedding dimension guard tests (#8)
+# ---------------------------------------------------------------------------
+
+
+def test_embedding_dims_stored_on_first_open(db) -> None:
+    """First SearchDB open should store EMBEDDING_DIM in db_meta."""
+    stored = db.get_meta("embedding_dims")
+    assert stored == str(db.EMBEDDING_DIM)
+
+
+def test_embedding_dims_mismatch_raises(tmp_path) -> None:
+    """Opening a DB with mismatched embedding_dims should raise RuntimeError."""
+    db_path = tmp_path / "mismatch.db"
+    db = SearchDB(db_path)
+    # Manually set a wrong dimension
+    db.set_meta("embedding_dims", "1024")
+    db.close()
+
+    with pytest.raises(RuntimeError, match="Embedding dimension mismatch"):
+        SearchDB(db_path)
+
+
 def test_cross_base_dir_migration(db) -> None:
     """Sources indexed with one base_dir should resolve correctly after migration."""
     db.set_base_dir(str(db.db_path.parent))

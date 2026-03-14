@@ -264,17 +264,33 @@ def model_swap(ctx: click.Context, model_name: str, reindex: bool) -> None:
 
         click.echo(f"  {len(rows)} chunks to re-embed")
 
+        # Load new embedder and validate dimensions
+        embedder = _get_embedder(config_path)
+        click.echo("  Checking new model dimensions...", nl=False)
+        test_embedding = embedder.embed(["dimension check"])
+        new_dims = len(test_embedding[0])
+        click.echo(f" {new_dims}-dim")
+
+        if new_dims != db.EMBEDDING_DIM:
+            click.echo(
+                f"\n  ERROR: Model '{model_name}' produces {new_dims}-dim embeddings, "
+                f"but VPS-FastSearch requires {db.EMBEDDING_DIM}-dim.\n"
+                f"  The vector table schema is fixed at {db.EMBEDDING_DIM} dimensions.\n"
+                f"  Choose a compatible model (e.g., BAAI/bge-base-en-v1.5 for 768-dim).",
+                err=True,
+            )
+            sys.exit(1)
+
         # Clear vector table and update embedding dims
         db._execute("DELETE FROM docs_vec")
         db._execute(
             "INSERT OR REPLACE INTO db_meta (key, value) VALUES ('embedding_dims', ?)",
-            (str(db.EMBEDDING_DIM),),
+            (str(new_dims),),
         )
 
-        # Load new embedder
-        embedder = _get_embedder(config_path)
-
         # Re-embed in batches with progress
+        import sqlite_vec
+
         BATCH_SIZE = 10
         done = 0
         for batch_start in range(0, len(rows), BATCH_SIZE):
@@ -286,8 +302,6 @@ def model_swap(ctx: click.Context, model_name: str, reindex: bool) -> None:
                 for (doc_id, _source, _chunk_idx, _content, _metadata), embedding in zip(
                     batch, embeddings, strict=True
                 ):
-                    import sqlite_vec
-
                     db._execute(
                         "INSERT INTO docs_vec (id, embedding) VALUES (?, ?)",
                         (doc_id, sqlite_vec.serialize_float32(embedding)),

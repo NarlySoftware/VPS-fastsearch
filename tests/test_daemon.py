@@ -1049,3 +1049,49 @@ class TestDaemonHelpers:
         ):
             result = stop_daemon()
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Instruction prefix tests (#15)
+# ---------------------------------------------------------------------------
+
+
+class TestDaemonPrefix:
+    """Tests for _get_prefix() helper in FastSearchDaemon."""
+
+    def _make_daemon_with_prefix(
+        self, doc_prefix: str = "", query_prefix: str = ""
+    ) -> FastSearchDaemon:
+        from vps_fastsearch.config import ModelConfig
+
+        config = _make_config()
+        config.models["embedder"] = ModelConfig(
+            name="BAAI/bge-base-en-v1.5",
+            keep_loaded="always",
+            document_prefix=doc_prefix,
+            query_prefix=query_prefix,
+        )
+        return FastSearchDaemon(config=config)
+
+    def test_get_prefix_query(self) -> None:
+        """_get_prefix('query') should return query_prefix from config."""
+        daemon = self._make_daemon_with_prefix(query_prefix="Query: ")
+        assert daemon._get_prefix("query") == "Query: "
+
+    def test_get_prefix_document(self) -> None:
+        """_get_prefix('document') should return document_prefix from config."""
+        daemon = self._make_daemon_with_prefix(doc_prefix="Doc: ")
+        assert daemon._get_prefix("document") == "Doc: "
+
+    def test_get_prefix_empty_when_not_configured(self) -> None:
+        """_get_prefix should return empty string when no prefix configured."""
+        daemon = self._make_daemon_with_prefix()
+        assert daemon._get_prefix("query") == ""
+        assert daemon._get_prefix("document") == ""
+
+    def test_get_prefix_no_embedder_config(self) -> None:
+        """_get_prefix should return empty string when embedder not in config."""
+        config = _make_config(include_models=False)
+        daemon = FastSearchDaemon(config=config)
+        assert daemon._get_prefix("query") == ""
+        assert daemon._get_prefix("document") == ""

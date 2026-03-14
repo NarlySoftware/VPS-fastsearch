@@ -409,7 +409,10 @@ class TestConvenienceFunctions:
 
         with (
             patch("vps_fastsearch.client.FastSearchClient") as MockClient,
-            patch("vps_fastsearch.core.get_embedder", return_value=mock_embedder),
+            patch(
+                "vps_fastsearch.client._get_embedder_with_config",
+                return_value=mock_embedder,
+            ),
         ):
             MockClient.return_value.__enter__.side_effect = DaemonNotRunningError("no daemon")
 

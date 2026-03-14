@@ -442,6 +442,100 @@ def test_from_dict_float_idle_timeout() -> None:
     assert config.models["test_model"].idle_timeout_seconds == 120
 
 
+# ---------------------------------------------------------------------------
+# Instruction prefix tests (#15)
+# ---------------------------------------------------------------------------
+
+
+def test_model_config_prefix_defaults() -> None:
+    """ModelConfig should default to empty prefix strings."""
+    mc = ModelConfig(name="test/model")
+    assert mc.document_prefix == ""
+    assert mc.query_prefix == ""
+
+
+def test_from_dict_flat_prefix_keys() -> None:
+    """Flat document_prefix and query_prefix keys should be parsed."""
+    data = {
+        "models": {
+            "embedder": {
+                "name": "test/model",
+                "document_prefix": "Represent this document: ",
+                "query_prefix": "Represent this query: ",
+            }
+        }
+    }
+    config = FastSearchConfig.from_dict(data)
+    assert config.models["embedder"].document_prefix == "Represent this document: "
+    assert config.models["embedder"].query_prefix == "Represent this query: "
+
+
+def test_from_dict_nested_instruction_prefix() -> None:
+    """Nested instruction_prefix dict should be parsed."""
+    data = {
+        "models": {
+            "embedder": {
+                "name": "test/model",
+                "instruction_prefix": {
+                    "document": "Doc prefix: ",
+                    "query": "Query prefix: ",
+                },
+            }
+        }
+    }
+    config = FastSearchConfig.from_dict(data)
+    assert config.models["embedder"].document_prefix == "Doc prefix: "
+    assert config.models["embedder"].query_prefix == "Query prefix: "
+
+
+def test_from_dict_flat_prefix_overrides_nested() -> None:
+    """Flat prefix keys should take priority over nested instruction_prefix."""
+    data = {
+        "models": {
+            "embedder": {
+                "name": "test/model",
+                "document_prefix": "Flat doc: ",
+                "instruction_prefix": {
+                    "document": "Nested doc: ",
+                },
+            }
+        }
+    }
+    config = FastSearchConfig.from_dict(data)
+    assert config.models["embedder"].document_prefix == "Flat doc: "
+
+
+def test_to_dict_omits_empty_prefixes() -> None:
+    """to_dict should not include prefix keys when they are empty."""
+    config = FastSearchConfig.default()
+    data = config.to_dict()
+    embedder_data = data["models"]["embedder"]
+    assert "document_prefix" not in embedder_data
+    assert "query_prefix" not in embedder_data
+
+
+def test_to_dict_includes_non_empty_prefixes() -> None:
+    """to_dict should include prefix keys when they are set."""
+    config = FastSearchConfig.default()
+    config.models["embedder"].document_prefix = "Doc: "
+    config.models["embedder"].query_prefix = "Query: "
+    data = config.to_dict()
+    embedder_data = data["models"]["embedder"]
+    assert embedder_data["document_prefix"] == "Doc: "
+    assert embedder_data["query_prefix"] == "Query: "
+
+
+def test_prefix_roundtrip_via_dict() -> None:
+    """Prefixes should survive to_dict -> from_dict roundtrip."""
+    config = FastSearchConfig.default()
+    config.models["embedder"].document_prefix = "Doc: "
+    config.models["embedder"].query_prefix = "Query: "
+    data = config.to_dict()
+    restored = FastSearchConfig.from_dict(data)
+    assert restored.models["embedder"].document_prefix == "Doc: "
+    assert restored.models["embedder"].query_prefix == "Query: "
+
+
 def test_from_yaml_yaml_list_instead_of_dict(tmp_path) -> None:
     """YAML content that parses to a list (not dict) should fall back to defaults."""
     config_file = tmp_path / "config.yaml"
