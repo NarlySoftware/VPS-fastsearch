@@ -975,6 +975,21 @@ def _qmd_search(
         click.echo("no results found.")
         return
 
+    # Load collections for path resolution
+    collections: list[dict[str, str]] = []
+    if Path(db_path).exists():
+        _db = SearchDB(db_path)
+        try:
+            collections = _load_collections(_db)
+            # Resolve source paths to absolute
+            for r in results:
+                r["_abs_source"] = _db.to_absolute(r["source"])
+        finally:
+            _db.close()
+    else:
+        for r in results:
+            r["_abs_source"] = r["source"]
+
     # Format as QMD JSON output
     qmd_results: list[dict[str, Any]] = []
     for r in results:
@@ -982,11 +997,27 @@ def _qmd_search(
         if "distance" in r:
             # Convert cosine distance to similarity score (1 - distance)
             score = max(0.0, 1.0 - r["distance"])
+
+        # Resolve file path: relative to collection root if possible, else absolute
+        abs_path = Path(r["_abs_source"])
+        file_path = str(abs_path)
+        result_collection = r.get("metadata", {}).get("collection", collection or "")
+
+        for coll in collections:
+            coll_root = Path(coll["path"])
+            try:
+                file_path = str(abs_path.relative_to(coll_root))
+                if not result_collection:
+                    result_collection = coll["name"]
+                break
+            except ValueError:
+                continue
+
         qmd_results.append({
-            "file": r["source"],
-            "collection": r.get("metadata", {}).get("collection", collection or ""),
+            "file": file_path,
+            "collection": result_collection,
             "docid": str(r["id"]),
-            "score": round(score, 4),
+            "score": round(float(score), 6),
             "snippet": r["content"][:500],
         })
 
