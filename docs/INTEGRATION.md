@@ -335,12 +335,16 @@ VPS-FastSearch daemon uses JSON-RPC 2.0 over a Unix socket with length-prefixed 
 |--------|--------|-------------|
 | `ping` | `{}` | Health check |
 | `status` | `{}` | Get daemon status |
-| `search` | `{query, db_path, limit, mode, rerank}` | Search documents |
+| `search` | `{query, db_path, limit, mode, rerank, metadata_filter?}` | Search documents |
 | `embed` | `{texts}` | Generate embeddings |
 | `rerank` | `{query, documents}` | Rerank documents |
 | `load_model` | `{slot}` | Load a model |
 | `unload_model` | `{slot}` | Unload a model |
 | `reload_config` | `{config_path?}` | Reload configuration |
+| `batch_index` | `{db_path, items}` | Index up to 1000 documents in one call |
+| `delete` | `{db_path, source?, id?}` | Delete documents by source or ID |
+| `update_content` | `{db_path, id, content}` | Update document content and re-embed |
+| `list_sources` | `{db_path}` | List all indexed sources with chunk counts |
 | `shutdown` | `{}` | Stop daemon |
 
 ---

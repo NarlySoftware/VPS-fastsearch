@@ -189,11 +189,11 @@ if [ -f "$INSTALL_DIR/vps-fastsearch.service" ]; then
         fi
     done
 
-    # Copy indexer script to scripts/
+    # Verify indexer script exists
     if [ -f "$INSTALL_DIR/scripts/fastsearch_indexer.py" ]; then
-        mkdir -p "$INSTALL_DIR/scripts"
-        cp "$INSTALL_DIR/scripts/fastsearch_indexer.py" "$INSTALL_DIR/scripts/fastsearch_indexer.py"
         echo "  Indexer script at $INSTALL_DIR/scripts/fastsearch_indexer.py"
+    else
+        echo "  WARNING: Indexer script not found at $INSTALL_DIR/scripts/fastsearch_indexer.py"
     fi
 
     # Enable and start the service if systemctl --user is available

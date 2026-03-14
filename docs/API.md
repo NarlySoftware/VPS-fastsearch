@@ -78,6 +78,7 @@ def search(
     limit: int = 10,
     mode: str = "hybrid",
     rerank: bool = False,
+    metadata_filter: dict[str, Any] | None = None,
 ) -> dict[str, Any]
 ```
 
@@ -88,6 +89,7 @@ def search(
 | `limit` | `int` | `10` | Maximum results |
 | `mode` | `str` | `"hybrid"` | Search mode: `hybrid`, `bm25`, `vector` |
 | `rerank` | `bool` | `False` | Apply cross-encoder reranking |
+| `metadata_filter` | `dict \| None` | `None` | Exact-match filter on metadata fields (AND logic) |
 
 **Returns:** `dict` with:
 - `query`: Original query
@@ -133,6 +135,9 @@ result = client.search("socket_path", mode="bm25")
 
 # Vector only (semantic search)
 result = client.search("how to set up the system", mode="vector")
+
+# Filter by metadata (exact match, AND logic)
+result = client.search("query", metadata_filter={"collection": "docs"})
 
 # Search different database
 result = client.search("query", db_path="/var/lib/fastsearch/main.db")
@@ -364,6 +369,7 @@ from vps_fastsearch import search
 
 results = search("query")
 results = search("query", limit=20, rerank=True)
+results = search("query", metadata_filter={"collection": "docs"})
 ```
 
 ### embed()

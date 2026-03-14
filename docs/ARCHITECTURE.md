@@ -18,8 +18,9 @@ daemon for low-latency queries.
 ```
                           vps-fastsearch CLI (cli.py)
                                     |
-                                    | Click commands: daemon, index, search,
-                                    |                 config, stats, delete, list
+                                    | Click commands: daemon, index, search, query,
+                                    |   vector_search, config, stats, delete, update,
+                                    |   embed, list, collection, migrate-paths
                                     v
                          FastSearchClient (client.py)
                                     |
@@ -59,7 +60,7 @@ model loading).
 
 ```
 vps_fastsearch/
-    __init__.py       # Package exports, version (0.3.0)
+    __init__.py       # Package exports, version (0.3.1)
     __main__.py       # python -m vps_fastsearch entry point
     cli.py            # Click CLI commands
     core.py           # Embedder, Reranker, SearchDB
@@ -564,7 +565,7 @@ stripped after reranking since they are no longer meaningful.
 ## 4. Database Schema
 
 The database uses SQLite via APSW bindings (not stdlib `sqlite3`) with the `sqlite-vec`
-loadable extension. The schema version is tracked via `PRAGMA user_version` (currently `2`).
+loadable extension. The schema version is tracked via `PRAGMA user_version` (currently `3`).
 
 ### PRAGMA Settings
 
@@ -575,7 +576,7 @@ loadable extension. The schema version is tracked via `PRAGMA user_version` (cur
 | `cache_size`          | `-4000`     | 4 MB page cache (negative = KB)                   |
 | `mmap_size`           | `268435456` | 256 MB memory-mapped I/O                          |
 | `wal_autocheckpoint`  | `1000`      | Checkpoint every 1000 pages                       |
-| `user_version`        | `2`         | Schema version for migration tracking              |
+| `user_version`        | `3`         | Schema version for migration tracking              |
 
 **Why WAL mode**: WAL allows concurrent read access while a single writer is active, which
 is critical for a daemon serving multiple simultaneous search requests. Without WAL, readers
@@ -713,7 +714,7 @@ into `docs` (triggering FTS sync) and then `docs_vec` in a single transaction.
 
 ### Schema Versioning
 
-Schema versioning uses `PRAGMA user_version` (currently `SCHEMA_VERSION = 2`). On database
+Schema versioning uses `PRAGMA user_version` (currently `SCHEMA_VERSION = 3`). On database
 open:
 - If the stored version is less than the code's version, migrations are applied and the
   version is updated.

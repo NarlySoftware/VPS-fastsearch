@@ -27,6 +27,11 @@ vps-fastsearch [OPTIONS] COMMAND [ARGS]...
 | `migrate-paths` | Convert absolute or misaligned relative source paths |
 | `daemon` | Manage the daemon server |
 | `config` | Manage configuration |
+| `query` | BM25/keyword search (QMD protocol) |
+| `vector_search` | Vector/semantic search (QMD protocol) |
+| `update` | Reindex all registered collections (QMD protocol) |
+| `embed` | Run embedding pass (QMD protocol, no-op) |
+| `collection` | Manage QMD collections |
 
 ---
 
@@ -528,6 +533,226 @@ vps-fastsearch config path
 **Output:**
 ```
 /Users/username/.config/fastsearch/config.yaml
+```
+
+---
+
+## QMD Protocol Commands
+
+These commands implement the QMD (Query-Memory-Daemon) protocol used by OpenClaw and other integrations. They always output JSON.
+
+### query
+
+BM25/keyword search via the QMD protocol.
+
+```bash
+vps-fastsearch query QUERY_TEXT [OPTIONS]
+```
+
+#### Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `QUERY_TEXT` | Yes | Search query text |
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-n` | `10` | Number of results to return |
+| `-c` | | Collection name filter |
+| `--json` | | JSON output (always on, hidden flag) |
+
+#### Example
+
+```bash
+# Keyword search
+vps-fastsearch query "configuration reference"
+
+# Limit results and filter by collection
+vps-fastsearch query "socket path" -n 5 -c docs
+```
+
+---
+
+### vector_search
+
+Vector/semantic search via the QMD protocol.
+
+```bash
+vps-fastsearch vector_search QUERY_TEXT [OPTIONS]
+```
+
+#### Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `QUERY_TEXT` | Yes | Search query text |
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-n` | `10` | Number of results to return |
+| `-c` | | Collection name filter |
+| `--json` | | JSON output (always on, hidden flag) |
+
+#### Example
+
+```bash
+# Semantic search
+vps-fastsearch vector_search "how do I set up the system"
+
+# Filter by collection
+vps-fastsearch vector_search "deployment steps" -c workspace -n 3
+```
+
+---
+
+### update
+
+Reindex all registered collections. Walks each collection path, chunks files matching the collection pattern, generates embeddings (via daemon if available, otherwise direct), and indexes the results.
+
+```bash
+vps-fastsearch update
+```
+
+No arguments or options. Silently skips collections whose paths do not exist or contain no matching files.
+
+#### Example
+
+```bash
+# Reindex everything
+vps-fastsearch update
+```
+
+---
+
+### embed
+
+Run an embedding pass (QMD protocol). This is a no-op -- embeddings are generated during `update`. Exits with code 0.
+
+```bash
+vps-fastsearch embed
+```
+
+---
+
+### QMD Search Output Format
+
+Both `query` and `vector_search` output a JSON array of result objects:
+
+```json
+[
+  {
+    "file": "relative/path/to/file.md",
+    "collection": "docs",
+    "docid": "42",
+    "score": 0.032258,
+    "snippet": "First 500 characters of the chunk..."
+  }
+]
+```
+
+---
+
+## collection
+
+Manage QMD collections (OpenClaw integration). Collections register directory paths with glob patterns for automated indexing via the `update` command.
+
+### collection add
+
+Register a collection path for QMD indexing.
+
+```bash
+vps-fastsearch collection add PATH --name NAME --mask GLOB
+```
+
+#### Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `PATH` | Yes | Directory path to index |
+
+#### Options
+
+| Option | Required | Description |
+|--------|----------|-------------|
+| `--name NAME` | Yes | Collection name |
+| `--mask GLOB` | Yes | Glob pattern for files (e.g., `**/*.md`) |
+
+#### Example
+
+```bash
+# Register a docs collection
+vps-fastsearch collection add ./docs --name docs --mask "**/*.md"
+
+# Register a workspace
+vps-fastsearch collection add ~/.openclaw/workspace --name workspace --mask "**/*.md"
+```
+
+### collection remove
+
+Remove a registered collection.
+
+```bash
+vps-fastsearch collection remove NAME
+```
+
+#### Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `NAME` | Yes | Collection name to remove |
+
+#### Example
+
+```bash
+vps-fastsearch collection remove docs
+```
+
+### collection list
+
+List all registered collections.
+
+```bash
+vps-fastsearch collection list [OPTIONS]
+```
+
+#### Options
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Output as JSON |
+
+#### Example
+
+```bash
+# Human-readable list
+vps-fastsearch collection list
+
+# JSON output
+vps-fastsearch collection list --json
+```
+
+#### Output (Text)
+
+```
+docs (qmd://docs)
+  path: /home/user/project/docs
+  pattern: **/*.md
+```
+
+#### Output (JSON)
+
+```json
+[
+  {
+    "name": "docs",
+    "path": "/home/user/project/docs",
+    "pattern": "**/*.md"
+  }
+]
 ```
 
 ---
