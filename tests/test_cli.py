@@ -64,7 +64,7 @@ def test_cli_migrate_paths_dry_run(tmp_path) -> None:
 
     # Verify DB was NOT modified
     db2 = SearchDB(db_path)
-    sources = [r[0] for r in db2._execute("SELECT DISTINCT source FROM docs")]
+    sources = [r[0] for r in db2._execute("SELECT DISTINCT source FROM chunks")]
     db2.close()
     assert Path(sources[0]).is_absolute()
 
@@ -85,7 +85,7 @@ def test_cli_migrate_paths_actual(tmp_path) -> None:
 
     # Verify DB WAS modified
     db2 = SearchDB(db_path)
-    sources = [r[0] for r in db2._execute("SELECT DISTINCT source FROM docs")]
+    sources = [r[0] for r in db2._execute("SELECT DISTINCT source FROM chunks")]
     db2.close()
     assert not Path(sources[0]).is_absolute()
 
@@ -178,7 +178,7 @@ def test_cli_migrate_paths_rebase_old_base_dir(tmp_path) -> None:
 
     # Verify the path is now clean
     db2 = SearchDB(db_path)
-    sources = [r[0] for r in db2._execute("SELECT DISTINCT source FROM docs")]
+    sources = [r[0] for r in db2._execute("SELECT DISTINCT source FROM chunks")]
     db2.close()
     assert sources == ["MEMORY.md"]
 

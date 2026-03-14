@@ -735,9 +735,6 @@ class FastSearchDaemon:
 
     async def _handle_delete(self, params: dict[str, Any]) -> dict[str, Any]:
         """Delete documents by source or by ID."""
-        db_path = params.get("db_path", DEFAULT_DB_PATH)
-        db, db_lock = self._get_db(db_path)
-
         source = params.get("source")
         doc_id = params.get("id")
 
@@ -745,12 +742,17 @@ class FastSearchDaemon:
             raise ValueError("Specify either 'source' or 'id', not both")
         if source is None and doc_id is None:
             raise ValueError("Missing 'source' or 'id' parameter")
+        if source is not None and (not isinstance(source, str) or not source):
+            raise ValueError("'source' must be a non-empty string")
+        if doc_id is not None and not isinstance(doc_id, int):
+            raise ValueError("'id' must be an integer")
+
+        db_path = params.get("db_path", DEFAULT_DB_PATH)
+        db, db_lock = self._get_db(db_path)
 
         loop = asyncio.get_running_loop()
 
         if source is not None:
-            if not isinstance(source, str) or not source:
-                raise ValueError("'source' must be a non-empty string")
 
             def _delete_source() -> int:
                 with db_lock:
@@ -759,8 +761,7 @@ class FastSearchDaemon:
             count = await loop.run_in_executor(None, _delete_source)
             return {"deleted": count, "source": source}
         else:
-            if not isinstance(doc_id, int):
-                raise ValueError("'id' must be an integer")
+            assert isinstance(doc_id, int)  # validated above
 
             def _delete_by_id() -> bool:
                 with db_lock:
@@ -771,9 +772,6 @@ class FastSearchDaemon:
 
     async def _handle_update_content(self, params: dict[str, Any]) -> dict[str, Any]:
         """Update content and embedding for a document by ID."""
-        db_path = params.get("db_path", DEFAULT_DB_PATH)
-        db, db_lock = self._get_db(db_path)
-
         doc_id = params.get("id")
         content = params.get("content")
 
@@ -783,6 +781,9 @@ class FastSearchDaemon:
             raise ValueError("'id' must be an integer")
         if not isinstance(content, str) or not content:
             raise ValueError("Missing or invalid 'content' parameter (must be non-empty string)")
+
+        db_path = params.get("db_path", DEFAULT_DB_PATH)
+        db, db_lock = self._get_db(db_path)
 
         # Generate embedding for the new content
         embedder_model = await self.model_manager.load_model("embedder")

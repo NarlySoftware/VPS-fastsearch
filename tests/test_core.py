@@ -9,14 +9,14 @@ from vps_fastsearch.core import SearchDB
 
 
 def test_init_schema(db) -> None:
-    """Database should have docs, docs_fts, and docs_vec tables."""
+    """Database should have chunks, chunks_fts, and chunks_vec tables."""
     tables = [
         row[0]
         for row in db._execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")
     ]
-    assert "docs" in tables
-    assert "docs_fts" in tables
-    assert "docs_vec" in tables
+    assert "chunks" in tables
+    assert "chunks_fts" in tables
+    assert "chunks_vec" in tables
 
 
 def test_index_and_search_bm25(db) -> None:
@@ -162,21 +162,21 @@ def test_search_bm25_limit_zero(db) -> None:
 
 def test_index_document_transaction_rollback(db) -> None:
     """After a failed index_document call (wrong dimensions), the database
-    should have no orphaned rows in docs, docs_fts, or docs_vec."""
+    should have no orphaned rows in chunks, chunks_fts, or chunks_vec."""
     bad_embedding = [0.1] * 100
 
     with pytest.raises(ValueError):
         db.index_document("test.md", 0, "Orphan content", bad_embedding)
 
-    # docs table must be empty
-    count = list(db._execute("SELECT COUNT(*) FROM docs"))[0][0]
+    # chunks table must be empty
+    count = list(db._execute("SELECT COUNT(*) FROM chunks"))[0][0]
     assert count == 0
 
-    # docs_vec table must be empty
-    vec_count = list(db._execute("SELECT COUNT(*) FROM docs_vec"))[0][0]
+    # chunks_vec table must be empty
+    vec_count = list(db._execute("SELECT COUNT(*) FROM chunks_vec"))[0][0]
     assert vec_count == 0
 
-    # FTS index must be empty (content table approach — query via docs_fts)
+    # FTS index must be empty (content table approach — query via chunks_fts)
     fts_results = db.search_bm25("Orphan", limit=5)
     assert fts_results == []
 
@@ -315,10 +315,10 @@ def test_index_with_relative_source_and_search(db) -> None:
     assert Path(resolved).resolve() == abs_file.resolve()
 
 
-def test_schema_version_updated_to_3(db) -> None:
-    """Schema version should be 3 after init (content_hash column addition)."""
+def test_schema_version_updated_to_4(db) -> None:
+    """Schema version should be 4 after init (chunks table rename)."""
     row = list(db._execute("PRAGMA user_version"))
-    assert row[0][0] == 3
+    assert row[0][0] == 4
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +341,7 @@ def test_delete_by_id(db) -> None:
     assert results[0]["id"] == id2
 
     # Vector table should also be cleaned up
-    vec_count = list(db._execute("SELECT COUNT(*) FROM docs_vec"))[0][0]
+    vec_count = list(db._execute("SELECT COUNT(*) FROM chunks_vec"))[0][0]
     assert vec_count == 1
 
 
@@ -651,7 +651,7 @@ def test_content_hash_stored_on_add(db) -> None:
     """index_document should store a content_hash."""
     emb = DUMMY_EMBEDDING
     doc_id = db.index_document("hash.md", 0, "Hash test content", emb)
-    row = list(db._execute("SELECT content_hash FROM docs WHERE id = ?", (doc_id,)))
+    row = list(db._execute("SELECT content_hash FROM chunks WHERE id = ?", (doc_id,)))
     assert row[0][0] is not None
     assert len(row[0][0]) == 64  # SHA-256 hex
 
@@ -660,10 +660,10 @@ def test_content_hash_updates_on_update_content(db) -> None:
     """update_content should recompute content_hash."""
     emb = DUMMY_EMBEDDING
     doc_id = db.index_document("hash.md", 0, "Original content", emb)
-    old_hash = list(db._execute("SELECT content_hash FROM docs WHERE id = ?", (doc_id,)))[0][0]
+    old_hash = list(db._execute("SELECT content_hash FROM chunks WHERE id = ?", (doc_id,)))[0][0]
 
     db.update_content(doc_id, "Updated content", emb)
-    new_hash = list(db._execute("SELECT content_hash FROM docs WHERE id = ?", (doc_id,)))[0][0]
+    new_hash = list(db._execute("SELECT content_hash FROM chunks WHERE id = ?", (doc_id,)))[0][0]
 
     assert old_hash != new_hash
     assert len(new_hash) == 64
@@ -716,7 +716,7 @@ def test_content_hash_batch_stored(db) -> None:
     ]
     ids = db.index_batch(items)
     for doc_id in ids:
-        row = list(db._execute("SELECT content_hash FROM docs WHERE id = ?", (doc_id,)))
+        row = list(db._execute("SELECT content_hash FROM chunks WHERE id = ?", (doc_id,)))
         assert row[0][0] is not None
         assert len(row[0][0]) == 64
 
@@ -734,17 +734,17 @@ def test_migrate_paths_basic(db) -> None:
     db.index_document(abs_source, 0, "Migrate test", DUMMY_EMBEDDING)
 
     # Verify it's absolute
-    sources = [r[0] for r in db._execute("SELECT DISTINCT source FROM docs")]
+    sources = [r[0] for r in db._execute("SELECT DISTINCT source FROM chunks")]
     assert Path(sources[0]).is_absolute()
 
     # Simulate migration logic (same as CLI command)
     abs_sources = [s for s in sources if Path(s).is_absolute()]
     for src in abs_sources:
         rel = db.to_relative(src)
-        db._execute("UPDATE docs SET source = ? WHERE source = ?", (rel, src))
+        db._execute("UPDATE chunks SET source = ? WHERE source = ?", (rel, src))
 
     # Verify it's now relative
-    new_sources = [r[0] for r in db._execute("SELECT DISTINCT source FROM docs")]
+    new_sources = [r[0] for r in db._execute("SELECT DISTINCT source FROM chunks")]
     assert not Path(new_sources[0]).is_absolute()
     assert new_sources[0] == str(Path("docs") / "readme.md")
 
@@ -760,7 +760,7 @@ def test_migrate_paths_collision_detection(db) -> None:
     db.index_document(abs_source, 1, "Absolute one", DUMMY_EMBEDDING)
 
     # Gather sources
-    sources = [r[0] for r in db._execute("SELECT DISTINCT source FROM docs")]
+    sources = [r[0] for r in db._execute("SELECT DISTINCT source FROM chunks")]
     absolute = [s for s in sources if Path(s).is_absolute()]
     already_relative = [s for s in sources if not Path(s).is_absolute()]
     existing_relative = set(already_relative)
@@ -779,18 +779,18 @@ def test_migrate_paths_already_relative(db) -> None:
     """migrate-paths should report already-relative sources and skip them."""
     db.index_document("relative/path.md", 0, "Already relative", DUMMY_EMBEDDING)
 
-    sources = [r[0] for r in db._execute("SELECT DISTINCT source FROM docs")]
+    sources = [r[0] for r in db._execute("SELECT DISTINCT source FROM chunks")]
     absolute = [s for s in sources if Path(s).is_absolute()]
     assert len(absolute) == 0  # Nothing to migrate
 
 
-def test_schema_v2_to_v3_migration(tmp_path) -> None:
-    """Opening a v2 database should auto-migrate to v3 with content_hash."""
+def test_old_docs_schema_raises_runtime_error(tmp_path) -> None:
+    """Opening a legacy database with 'docs' tables (v1-v3) should raise RuntimeError."""
     import apsw
     import sqlite_vec as sv
 
     db_path = tmp_path / "legacy.db"
-    # Create a v2-style database manually (with all triggers for FTS sync)
+    # Create a v3-style database with old 'docs' table names
     conn = apsw.Connection(str(db_path))
     conn.enableloadextension(True)
     conn.loadextension(sv.loadable_path())
@@ -803,6 +803,7 @@ def test_schema_v2_to_v3_migration(tmp_path) -> None:
             chunk_index INTEGER NOT NULL,
             content TEXT NOT NULL,
             metadata JSON,
+            content_hash TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -817,24 +818,6 @@ def test_schema_v2_to_v3_migration(tmp_path) -> None:
         )
     """)
     conn.execute("""
-        CREATE TRIGGER docs_ai AFTER INSERT ON docs BEGIN
-            INSERT INTO docs_fts(rowid, content) VALUES (new.id, new.content);
-        END
-    """)
-    conn.execute("""
-        CREATE TRIGGER docs_ad AFTER DELETE ON docs BEGIN
-            INSERT INTO docs_fts(docs_fts, rowid, content)
-                VALUES('delete', old.id, old.content);
-        END
-    """)
-    conn.execute("""
-        CREATE TRIGGER docs_au AFTER UPDATE ON docs BEGIN
-            INSERT INTO docs_fts(docs_fts, rowid, content)
-                VALUES('delete', old.id, old.content);
-            INSERT INTO docs_fts(rowid, content) VALUES (new.id, new.content);
-        END
-    """)
-    conn.execute("""
         CREATE VIRTUAL TABLE docs_vec USING vec0(
             id INTEGER PRIMARY KEY, embedding float32[768]
         )
@@ -842,28 +825,16 @@ def test_schema_v2_to_v3_migration(tmp_path) -> None:
     conn.execute("""
         CREATE TABLE db_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)
     """)
-    # Insert a row WITHOUT content_hash column
     conn.execute(
         "INSERT INTO docs (source, chunk_index, content, metadata) VALUES (?, ?, ?, ?)",
         ("old.md", 0, "Legacy content", "{}"),
     )
-    # Manually sync FTS for this row
-    conn.execute("PRAGMA user_version = 2")
+    conn.execute("PRAGMA user_version = 3")
     conn.close()
 
-    # Open with SearchDB — should trigger v2→v3 migration
-    db = SearchDB(db_path)
-    try:
-        # Schema version should be 3
-        row = list(db._execute("PRAGMA user_version"))
-        assert row[0][0] == 3
-
-        # content_hash column should exist and be backfilled
-        result = list(db._execute("SELECT content_hash FROM docs WHERE id = 1"))
-        assert result[0][0] is not None
-        assert len(result[0][0]) == 64  # SHA-256 hex
-    finally:
-        db.close()
+    # Open with SearchDB — should raise RuntimeError telling user to delete and re-index
+    with pytest.raises(RuntimeError, match="chunks"):
+        SearchDB(db_path)
 
 
 # ---------------------------------------------------------------------------
@@ -971,7 +942,7 @@ def test_cross_base_dir_migration(db) -> None:
 
     # Migrate to relative
     rel = db.to_relative(abs_source)
-    db._execute("UPDATE docs SET source = ? WHERE source = ?", (rel, abs_source))
+    db._execute("UPDATE chunks SET source = ? WHERE source = ?", (rel, abs_source))
 
     # Change base_dir (simulating different machine)
     new_base = db.db_path.parent / "other_root"
@@ -979,6 +950,6 @@ def test_cross_base_dir_migration(db) -> None:
     db.set_base_dir(str(new_base))
 
     # Resolve — should use new base_dir
-    sources = [r[0] for r in db._execute("SELECT source FROM docs")]
+    sources = [r[0] for r in db._execute("SELECT source FROM chunks")]
     resolved = db.to_absolute(sources[0])
     assert str(new_base) in resolved

@@ -318,7 +318,7 @@ def model_swap(ctx: click.Context, model_name: str, reindex: bool) -> None:
     try:
         # Get all documents
         rows = list(
-            db._execute("SELECT id, source, chunk_index, content, metadata FROM docs ORDER BY id")
+            db._execute("SELECT id, source, chunk_index, content, metadata FROM chunks ORDER BY id")
         )
 
         if not rows:
@@ -345,7 +345,7 @@ def model_swap(ctx: click.Context, model_name: str, reindex: bool) -> None:
             sys.exit(1)
 
         # Clear vector table and update embedding dims
-        db._execute("DELETE FROM docs_vec")
+        db._execute("DELETE FROM chunks_vec")
         db._execute(
             "INSERT OR REPLACE INTO db_meta (key, value) VALUES ('embedding_dims', ?)",
             (str(new_dims),),
@@ -366,7 +366,7 @@ def model_swap(ctx: click.Context, model_name: str, reindex: bool) -> None:
                     batch, embeddings, strict=True
                 ):
                     db._execute(
-                        "INSERT INTO docs_vec (id, embedding) VALUES (?, ?)",
+                        "INSERT INTO chunks_vec (id, embedding) VALUES (?, ?)",
                         (doc_id, sqlite_vec.serialize_float32(embedding)),
                     )
 
@@ -996,7 +996,7 @@ def migrate_paths(
             click.echo(f"Old base directory: {old_base_dir}")
 
         # Get all distinct source values
-        rows = list(db._execute("SELECT DISTINCT source FROM docs"))
+        rows = list(db._execute("SELECT DISTINCT source FROM chunks"))
         sources = [row[0] for row in rows]
 
         if not sources:
@@ -1104,7 +1104,7 @@ def migrate_paths(
         with db._transaction():
             for old_src, new_rel in migrations:
                 db._execute(
-                    "UPDATE docs SET source = ? WHERE source = ?",
+                    "UPDATE chunks SET source = ? WHERE source = ?",
                     (new_rel, old_src),
                 )
                 converted += 1
@@ -1167,9 +1167,9 @@ def _qmd_get_snippet(db: SearchDB, query_text: str, doc_id: int, mode: str) -> s
             try:
                 rows = list(db._execute(
                     """
-                    SELECT snippet(docs_fts, 0, '**', '**', '...', 12)
-                    FROM docs_fts
-                    WHERE docs_fts MATCH ? AND rowid = ?
+                    SELECT snippet(chunks_fts, 0, '**', '**', '...', 12)
+                    FROM chunks_fts
+                    WHERE chunks_fts MATCH ? AND rowid = ?
                     """,
                     (fts_query, doc_id),
                 ))
@@ -1179,7 +1179,7 @@ def _qmd_get_snippet(db: SearchDB, query_text: str, doc_id: int, mode: str) -> s
                 pass
 
     # Fallback: first 200 chars of content
-    rows = list(db._execute("SELECT content FROM docs WHERE id = ?", (doc_id,)))
+    rows = list(db._execute("SELECT content FROM chunks WHERE id = ?", (doc_id,)))
     if rows:
         content = rows[0][0]
         return str(content[:200])

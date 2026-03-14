@@ -17,7 +17,7 @@ import sqlite_vec
 logger = logging.getLogger(__name__)
 
 # Schema version for migration tracking (via PRAGMA user_version)
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Lazy import fastembed to speed up CLI startup
 _embedder_instance = None
@@ -458,9 +458,9 @@ class SearchDB:
 
     def _init_schema(self) -> None:
         """Initialize database schema."""
-        # Main docs table
+        # Main chunks table (one row per text chunk)
         self._execute("""
-            CREATE TABLE IF NOT EXISTS docs (
+            CREATE TABLE IF NOT EXISTS chunks (
                 id INTEGER PRIMARY KEY,
                 source TEXT NOT NULL,
                 chunk_index INTEGER NOT NULL,
@@ -470,17 +470,18 @@ class SearchDB:
             )
         """)
 
-        self._execute("CREATE INDEX IF NOT EXISTS idx_docs_source ON docs(source)")
+        self._execute("CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source)")
 
         self._execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_docs_source_chunk ON docs(source, chunk_index)"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_source_chunk"
+            " ON chunks(source, chunk_index)"
         )
 
-        # FTS5 virtual table
+        # FTS5 virtual table for BM25 search
         self._execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
+            CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
                 content,
-                content='docs',
+                content='chunks',
                 content_rowid='id',
                 tokenize='porter unicode61'
             )
@@ -488,30 +489,30 @@ class SearchDB:
 
         # Triggers to keep FTS in sync
         self._execute("""
-            CREATE TRIGGER IF NOT EXISTS docs_ai AFTER INSERT ON docs BEGIN
-                INSERT INTO docs_fts(rowid, content) VALUES (new.id, new.content);
+            CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
+                INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
             END
         """)
 
         self._execute("""
-            CREATE TRIGGER IF NOT EXISTS docs_ad AFTER DELETE ON docs BEGIN
-                INSERT INTO docs_fts(docs_fts, rowid, content) VALUES('delete', old.id, old.content);
+            CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
+                INSERT INTO chunks_fts(chunks_fts, rowid, content)
+                    VALUES('delete', old.id, old.content);
             END
         """)
 
-        # Recreate the UPDATE trigger unconditionally to fix a bug in earlier
-        # versions where the second INSERT used 3 column names but only 2 values.
-        self._execute("DROP TRIGGER IF EXISTS docs_au")
+        self._execute("DROP TRIGGER IF EXISTS chunks_au")
         self._execute("""
-            CREATE TRIGGER docs_au AFTER UPDATE ON docs BEGIN
-                INSERT INTO docs_fts(docs_fts, rowid, content) VALUES('delete', old.id, old.content);
-                INSERT INTO docs_fts(rowid, content) VALUES (new.id, new.content);
+            CREATE TRIGGER chunks_au AFTER UPDATE ON chunks BEGIN
+                INSERT INTO chunks_fts(chunks_fts, rowid, content)
+                    VALUES('delete', old.id, old.content);
+                INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
             END
         """)
 
-        # Vector virtual table
+        # Vector virtual table for embedding search
         self._execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS docs_vec USING vec0(
+            CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(
                 id INTEGER PRIMARY KEY,
                 embedding float32[768]
             )
@@ -541,34 +542,23 @@ class SearchDB:
             )
 
         if current_version < SCHEMA_VERSION:
-            if current_version < 2:
-                # v1 -> v2: add db_meta table (CREATE IF NOT EXISTS already ran above)
-                logger.info("Migrating database schema v1 -> v2: adding db_meta table")
-            if current_version < 3:
-                # v2 -> v3: add content_hash column
-                logger.info("Migrating database schema -> v3: adding content_hash column")
-                cols = [r[1] for r in self._execute("PRAGMA table_info(docs)")]
-                if "content_hash" not in cols:
-                    self._execute("ALTER TABLE docs ADD COLUMN content_hash TEXT")
-                self._execute(
-                    "CREATE INDEX IF NOT EXISTS idx_docs_content_hash ON docs(content_hash)"
+            if current_version > 0 and current_version <= 3:
+                # v1-v3 used 'docs' table names; v4 renames to 'chunks'.
+                # No auto-migration — user must delete and re-index.
+                raise RuntimeError(
+                    f"Database uses old schema v{current_version} (table 'docs'). "
+                    f"VPS-FastSearch v0.3.2+ uses 'chunks' tables. "
+                    f"Delete {self.db_path} and re-index: "
+                    f"vps-fastsearch index <path> or vps-fastsearch update"
                 )
-                # Backfill content_hash for existing rows
-                rows_to_update = list(
-                    self._execute("SELECT id, content FROM docs WHERE content_hash IS NULL")
-                )
-                if rows_to_update:
-                    logger.info(
-                        "Backfilling content_hash for %d existing rows", len(rows_to_update)
-                    )
-                    for doc_id, content in rows_to_update:
-                        self._execute(
-                            "UPDATE docs SET content_hash = ? WHERE id = ?",
-                            (_content_hash(content), doc_id),
-                        )
-            logger.info(
-                f"Updating database schema version from {current_version} to {SCHEMA_VERSION}"
+            # New database (version 0) — set content_hash column and version
+            cols = [r[1] for r in self._execute("PRAGMA table_info(chunks)")]
+            if "content_hash" not in cols:
+                self._execute("ALTER TABLE chunks ADD COLUMN content_hash TEXT")
+            self._execute(
+                "CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash)"
             )
+            logger.info(f"Setting database schema version to {SCHEMA_VERSION}")
             self._execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def _check_embedding_dims(self) -> None:
@@ -608,7 +598,7 @@ class SearchDB:
         """
         escaped = pattern.replace("%", r"\%").replace("_", r"\_")
         cursor = self._execute(
-            "SELECT DISTINCT source FROM docs WHERE source LIKE ? ESCAPE '\\'",
+            "SELECT DISTINCT source FROM chunks WHERE source LIKE ? ESCAPE '\\'",
             (f"%{escaped}%",),
         )
         return [row[0] for row in cursor]
@@ -641,7 +631,7 @@ class SearchDB:
         if skip_duplicates:
             existing = list(
                 self._execute(
-                    "SELECT id FROM docs WHERE content_hash = ? LIMIT 1",
+                    "SELECT id FROM chunks WHERE content_hash = ? LIMIT 1",
                     (content_hash_val,),
                 )
             )
@@ -650,10 +640,10 @@ class SearchDB:
 
         self.conn.execute("BEGIN")
         try:
-            # Insert into main docs table (triggers handle FTS)
+            # Insert into chunks table (triggers handle FTS)
             self._execute(
                 """
-                INSERT INTO docs (source, chunk_index, content, metadata, content_hash)
+                INSERT INTO chunks (source, chunk_index, content, metadata, content_hash)
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 (
@@ -669,7 +659,7 @@ class SearchDB:
             # Insert embedding into vector table
             self._execute(
                 """
-                INSERT INTO docs_vec (id, embedding)
+                INSERT INTO chunks_vec (id, embedding)
                 VALUES (?, ?)
                 """,
                 (doc_id, sqlite_vec.serialize_float32(embedding)),
@@ -717,7 +707,7 @@ class SearchDB:
         if skip_duplicates:
             for h in hashes:
                 rows = list(
-                    self._execute("SELECT 1 FROM docs WHERE content_hash = ? LIMIT 1", (h,))
+                    self._execute("SELECT 1 FROM chunks WHERE content_hash = ? LIMIT 1", (h,))
                 )
                 if rows:
                     existing_hashes.add(h)
@@ -736,20 +726,20 @@ class SearchDB:
                 # Use INSERT OR REPLACE for idempotent retries — if the same
                 # (source, chunk_index) pair already exists (e.g. from a retried
                 # request after timeout), it will be overwritten safely.
-                # First check if a row already exists so we can clean up docs_vec.
+                # First check if a row already exists so we can clean up chunks_vec.
                 existing = list(
                     self._execute(
-                        "SELECT id FROM docs WHERE source = ? AND chunk_index = ?",
+                        "SELECT id FROM chunks WHERE source = ? AND chunk_index = ?",
                         (source, chunk_index),
                     )
                 )
                 if existing:
                     old_id = existing[0][0]
-                    self._execute("DELETE FROM docs_vec WHERE id = ?", (old_id,))
+                    self._execute("DELETE FROM chunks_vec WHERE id = ?", (old_id,))
 
                 self._execute(
                     """
-                    INSERT OR REPLACE INTO docs (source, chunk_index, content, metadata, content_hash)
+                    INSERT OR REPLACE INTO chunks (source, chunk_index, content, metadata, content_hash)
                     VALUES (?, ?, ?, ?, ?)
                     """,
                     (
@@ -765,7 +755,7 @@ class SearchDB:
 
                 self._execute(
                     """
-                    INSERT INTO docs_vec (id, embedding)
+                    INSERT INTO chunks_vec (id, embedding)
                     VALUES (?, ?)
                     """,
                     (doc_id, sqlite_vec.serialize_float32(embedding)),
@@ -821,10 +811,10 @@ class SearchDB:
                 d.chunk_index,
                 d.content,
                 d.metadata,
-                -bm25(docs_fts) as score
-            FROM docs_fts f
-            JOIN docs d ON f.rowid = d.id
-            WHERE docs_fts MATCH ?{meta_sql}
+                -bm25(chunks_fts) as score
+            FROM chunks_fts f
+            JOIN chunks d ON f.rowid = d.id
+            WHERE chunks_fts MATCH ?{meta_sql}
             ORDER BY score DESC
             LIMIT ?
             """,
@@ -888,12 +878,12 @@ class SearchDB:
                 SELECT sub.id, sub.distance, d.source, d.chunk_index, d.content, d.metadata
                 FROM (
                     SELECT v.id, v.distance
-                    FROM docs_vec v
+                    FROM chunks_vec v
                     WHERE embedding MATCH ?
                         AND k = ?
                     ORDER BY distance
                 ) sub
-                JOIN docs d ON sub.id = d.id
+                JOIN chunks d ON sub.id = d.id
                 WHERE 1=1{meta_sql}
                 ORDER BY sub.distance
                 LIMIT ?
@@ -910,8 +900,8 @@ class SearchDB:
                     d.chunk_index,
                     d.content,
                     d.metadata
-                FROM docs_vec v
-                JOIN docs d ON v.id = d.id
+                FROM chunks_vec v
+                JOIN chunks d ON v.id = d.id
                 WHERE embedding MATCH ?
                     AND k = ?
                 ORDER BY distance
@@ -1097,18 +1087,18 @@ class SearchDB:
 
     def delete_source(self, source: str) -> int:
         """Delete all chunks from a source. Returns count deleted."""
-        count = list(self._execute("SELECT COUNT(*) FROM docs WHERE source = ?", (source,)))[0][0]
+        count = list(self._execute("SELECT COUNT(*) FROM chunks WHERE source = ?", (source,)))[0][0]
 
         if count:
             self.conn.execute("BEGIN")
             try:
-                # Delete from vector table via subquery (must precede docs DELETE)
+                # Delete from vector table via subquery (must precede chunks DELETE)
                 self._execute(
-                    "DELETE FROM docs_vec WHERE id IN (SELECT id FROM docs WHERE source = ?)",
+                    "DELETE FROM chunks_vec WHERE id IN (SELECT id FROM chunks WHERE source = ?)",
                     (source,),
                 )
-                # Delete from docs (triggers handle FTS)
-                self._execute("DELETE FROM docs WHERE source = ?", (source,))
+                # Delete from chunks (triggers handle FTS)
+                self._execute("DELETE FROM chunks WHERE source = ?", (source,))
                 self.conn.execute("COMMIT")
             except Exception:
                 try:
@@ -1124,9 +1114,9 @@ class SearchDB:
         self.conn.execute("BEGIN")
         try:
             # Delete from vector table first (no trigger for this)
-            self._execute("DELETE FROM docs_vec WHERE id = ?", (doc_id,))
-            # Delete from docs (triggers handle FTS sync)
-            self._execute("DELETE FROM docs WHERE id = ?", (doc_id,))
+            self._execute("DELETE FROM chunks_vec WHERE id = ?", (doc_id,))
+            # Delete from chunks (triggers handle FTS sync)
+            self._execute("DELETE FROM chunks WHERE id = ?", (doc_id,))
             affected = self.conn.changes()
             if affected == 0:
                 self.conn.execute("ROLLBACK")
@@ -1148,9 +1138,9 @@ class SearchDB:
 
         self.conn.execute("BEGIN")
         try:
-            # Update docs table (trigger handles FTS delete-old + insert-new)
+            # Update chunks table (trigger handles FTS delete-old + insert-new)
             self._execute(
-                "UPDATE docs SET content = ?, content_hash = ? WHERE id = ?",
+                "UPDATE chunks SET content = ?, content_hash = ? WHERE id = ?",
                 (content, _content_hash(content), doc_id),
             )
             affected = self.conn.changes()
@@ -1160,9 +1150,9 @@ class SearchDB:
             # Update vector table — sqlite-vec vec0 doesn't support UPDATE, so
             # delete + re-insert.  Use positional VALUES (not named columns)
             # to work around a vec0 quirk after DELETE in the same transaction.
-            self._execute("DELETE FROM docs_vec WHERE id = ?", (doc_id,))
+            self._execute("DELETE FROM chunks_vec WHERE id = ?", (doc_id,))
             self._execute(
-                "INSERT INTO docs_vec VALUES (?, ?)",
+                "INSERT INTO chunks_vec VALUES (?, ?)",
                 (doc_id, sqlite_vec.serialize_float32(embedding)),
             )
             self.conn.execute("COMMIT")
@@ -1179,7 +1169,7 @@ class SearchDB:
         """List all unique sources with chunk counts and ID ranges."""
         cursor = self._execute(
             "SELECT source, COUNT(*) as chunks, MIN(id) as min_id, MAX(id) as max_id "
-            "FROM docs GROUP BY source ORDER BY source"
+            "FROM chunks GROUP BY source ORDER BY source"
         )
         return [
             {
@@ -1193,13 +1183,13 @@ class SearchDB:
 
     def get_stats(self) -> dict[str, Any]:
         """Get database statistics."""
-        doc_count = list(self._execute("SELECT COUNT(*) FROM docs"))[0][0]
-        source_count = list(self._execute("SELECT COUNT(DISTINCT source) FROM docs"))[0][0]
+        doc_count = list(self._execute("SELECT COUNT(*) FROM chunks"))[0][0]
+        source_count = list(self._execute("SELECT COUNT(DISTINCT source) FROM chunks"))[0][0]
 
         top_sources = [
             {"source": row[0], "chunks": row[1]}
             for row in self._execute(
-                "SELECT source, COUNT(*) as chunks FROM docs GROUP BY source ORDER BY chunks DESC LIMIT 10"
+                "SELECT source, COUNT(*) as chunk_count FROM chunks GROUP BY source ORDER BY chunk_count DESC LIMIT 10"
             )
         ]
 
