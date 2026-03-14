@@ -118,10 +118,18 @@ class ModelManager:
 
         instance: Any
         if slot == "embedder":
-            from fastembed import TextEmbedding
+            from .core import Embedder
 
-            # Limit ONNX threads to reduce arena memory allocation
-            instance = TextEmbedding(model_config.name, threads=model_config.threads)
+            # Use Embedder class which supports fastembed, ollama, and http providers
+            instance = Embedder(
+                model_name=model_config.name,
+                document_prefix=model_config.document_prefix,
+                query_prefix=model_config.query_prefix,
+                provider=model_config.provider,
+                base_url=model_config.base_url,
+                api_key=model_config.api_key,
+                threads=model_config.threads,
+            )
         elif slot == "reranker":
             from sentence_transformers import CrossEncoder
 
@@ -409,15 +417,6 @@ class FastSearchDaemon:
             **model_status,
         }
 
-    def _get_prefix(self, kind: str) -> str:
-        """Get instruction prefix for embedder ('document' or 'query')."""
-        embedder_config = self.config.models.get("embedder")
-        if embedder_config is None:
-            return ""
-        if kind == "query":
-            return embedder_config.query_prefix
-        return embedder_config.document_prefix
-
     _DB_CACHE_MAX: int = 8
 
     def _get_db(self, db_path: str) -> tuple[SearchDB, threading.Lock]:
@@ -500,9 +499,7 @@ class FastSearchDaemon:
 
                 results = await loop.run_in_executor(None, _search_bm25)
             elif mode == "vector":
-                q_prefix = self._get_prefix("query")
-                q_text = q_prefix + query if q_prefix else query
-                embedding = list(embedder_model.instance.embed([q_text]))[0].tolist()
+                embedding = embedder_model.instance.embed_query(query)
 
                 def _search_vector() -> list[Any]:
                     with db_lock:
@@ -512,9 +509,7 @@ class FastSearchDaemon:
 
                 results = await loop.run_in_executor(None, _search_vector)
             else:  # hybrid
-                q_prefix = self._get_prefix("query")
-                q_text = q_prefix + query if q_prefix else query
-                embedding = list(embedder_model.instance.embed([q_text]))[0].tolist()
+                embedding = embedder_model.instance.embed_query(query)
 
                 if rerank:
                     # Load reranker on-demand
@@ -573,14 +568,11 @@ class FastSearchDaemon:
 
         try:
             start_time = time.perf_counter()
-            d_prefix = self._get_prefix("document")
-            if d_prefix:
-                texts = [d_prefix + t for t in texts]
-            embeddings = list(embedder_model.instance.embed(texts))
+            embeddings = embedder_model.instance.embed(texts)
             embed_time = time.perf_counter() - start_time
 
             return {
-                "embeddings": [e.tolist() for e in embeddings],
+                "embeddings": embeddings,
                 "count": len(embeddings),
                 "embed_time_ms": round(embed_time * 1000, 2),
             }
@@ -796,12 +788,9 @@ class FastSearchDaemon:
         embedder_model = await self.model_manager.load_model("embedder")
         try:
             loop = asyncio.get_running_loop()
-            d_prefix = self._get_prefix("document")
-            embed_text = d_prefix + content if d_prefix else content
-            embeddings = await loop.run_in_executor(
-                None, lambda: list(embedder_model.instance.embed([embed_text]))
+            embedding = await loop.run_in_executor(
+                None, lambda: embedder_model.instance.embed([content])[0]
             )
-            embedding = embeddings[0].tolist()
         finally:
             await self.model_manager.release_model("embedder")
 

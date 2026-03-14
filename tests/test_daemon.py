@@ -859,10 +859,9 @@ class TestHandleUpdateContent:
         db_lock = threading.Lock()
 
         # Mock the model manager to return a mock embedder
+        # Embedder.embed() now returns list[list[float]] (not numpy arrays)
         mock_embedder = MagicMock()
-        mock_embedding = MagicMock()
-        mock_embedding.tolist.return_value = DUMMY_EMBEDDING
-        mock_embedder.instance.embed.return_value = iter([mock_embedding])
+        mock_embedder.instance.embed.return_value = [DUMMY_EMBEDDING]
 
         async def mock_load_model(slot: str) -> Any:
             return mock_embedder
@@ -1056,42 +1055,63 @@ class TestDaemonHelpers:
 # ---------------------------------------------------------------------------
 
 
-class TestDaemonPrefix:
-    """Tests for _get_prefix() helper in FastSearchDaemon."""
+class TestDaemonEmbedderConfig:
+    """Tests verifying daemon passes config correctly to Embedder."""
 
-    def _make_daemon_with_prefix(
-        self, doc_prefix: str = "", query_prefix: str = ""
-    ) -> FastSearchDaemon:
+    def test_embedder_config_stored_in_model_manager(self) -> None:
+        """ModelManager should have access to embedder config with prefixes."""
         from vps_fastsearch.config import ModelConfig
 
         config = _make_config()
         config.models["embedder"] = ModelConfig(
             name="BAAI/bge-base-en-v1.5",
             keep_loaded="always",
-            document_prefix=doc_prefix,
-            query_prefix=query_prefix,
+            document_prefix="Doc: ",
+            query_prefix="Query: ",
+            provider="fastembed",
         )
-        return FastSearchDaemon(config=config)
-
-    def test_get_prefix_query(self) -> None:
-        """_get_prefix('query') should return query_prefix from config."""
-        daemon = self._make_daemon_with_prefix(query_prefix="Query: ")
-        assert daemon._get_prefix("query") == "Query: "
-
-    def test_get_prefix_document(self) -> None:
-        """_get_prefix('document') should return document_prefix from config."""
-        daemon = self._make_daemon_with_prefix(doc_prefix="Doc: ")
-        assert daemon._get_prefix("document") == "Doc: "
-
-    def test_get_prefix_empty_when_not_configured(self) -> None:
-        """_get_prefix should return empty string when no prefix configured."""
-        daemon = self._make_daemon_with_prefix()
-        assert daemon._get_prefix("query") == ""
-        assert daemon._get_prefix("document") == ""
-
-    def test_get_prefix_no_embedder_config(self) -> None:
-        """_get_prefix should return empty string when embedder not in config."""
-        config = _make_config(include_models=False)
         daemon = FastSearchDaemon(config=config)
-        assert daemon._get_prefix("query") == ""
-        assert daemon._get_prefix("document") == ""
+        embedder_cfg = daemon.config.models["embedder"]
+        assert embedder_cfg.document_prefix == "Doc: "
+        assert embedder_cfg.query_prefix == "Query: "
+        assert embedder_cfg.provider == "fastembed"
+
+    def test_ollama_provider_in_config(self) -> None:
+        """Config should accept ollama provider settings."""
+        from vps_fastsearch.config import ModelConfig
+
+        config = _make_config()
+        config.models["embedder"] = ModelConfig(
+            name="nomic-embed-text",
+            keep_loaded="always",
+            provider="ollama",
+            base_url="http://localhost:11434",
+        )
+        daemon = FastSearchDaemon(config=config)
+        embedder_cfg = daemon.config.models["embedder"]
+        assert embedder_cfg.provider == "ollama"
+        assert embedder_cfg.base_url == "http://localhost:11434"
+
+    def test_http_provider_in_config(self) -> None:
+        """Config should accept http provider settings."""
+        from vps_fastsearch.config import ModelConfig
+
+        config = _make_config()
+        config.models["embedder"] = ModelConfig(
+            name="text-embedding-3-small",
+            keep_loaded="always",
+            provider="http",
+            base_url="http://localhost:8080/v1",
+            api_key="test-key",
+        )
+        daemon = FastSearchDaemon(config=config)
+        embedder_cfg = daemon.config.models["embedder"]
+        assert embedder_cfg.provider == "http"
+        assert embedder_cfg.base_url == "http://localhost:8080/v1"
+        assert embedder_cfg.api_key == "test-key"
+
+    def test_default_provider_is_fastembed(self) -> None:
+        """Default provider should be fastembed."""
+        config = _make_config()
+        embedder_cfg = config.models["embedder"]
+        assert embedder_cfg.provider == "fastembed"

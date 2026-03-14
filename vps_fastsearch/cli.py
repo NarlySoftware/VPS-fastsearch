@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_embedder(config_path: str | None = None) -> Embedder:
-    """Get embedder singleton with instruction prefixes from config."""
+    """Get embedder singleton with full config (provider, prefixes, etc.)."""
     cfg = load_config(config_path)
     embedder_config = cfg.models.get("embedder")
     if embedder_config:
@@ -27,6 +27,10 @@ def _get_embedder(config_path: str | None = None) -> Embedder:
             model_name=embedder_config.name or None,
             document_prefix=embedder_config.document_prefix,
             query_prefix=embedder_config.query_prefix,
+            provider=embedder_config.provider,
+            base_url=embedder_config.base_url,
+            api_key=embedder_config.api_key,
+            threads=embedder_config.threads,
         )
     return Embedder.get_instance()
 

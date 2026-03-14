@@ -43,6 +43,9 @@ class ModelConfig:
     threads: int = 2
     document_prefix: str = ""
     query_prefix: str = ""
+    provider: str = "fastembed"
+    base_url: str = ""
+    api_key: str = ""
 
 
 @dataclass
@@ -135,6 +138,11 @@ class FastSearchConfig:
                     doc_prefix = doc_prefix or prefix_data.get("document", "")
                     query_prefix = query_prefix or prefix_data.get("query", "")
 
+                # Embedding provider config
+                provider = str(model_data.get("provider", "fastembed"))
+                base_url = str(model_data.get("base_url", ""))
+                api_key = str(model_data.get("api_key", ""))
+
                 models[name] = ModelConfig(
                     name=model_data.get("name", ""),
                     keep_loaded=keep_loaded,
@@ -142,6 +150,9 @@ class FastSearchConfig:
                     threads=threads,
                     document_prefix=str(doc_prefix),
                     query_prefix=str(query_prefix),
+                    provider=provider,
+                    base_url=base_url,
+                    api_key=api_key,
                 )
 
         memory_data = data.get("memory", {})
@@ -210,6 +221,9 @@ class FastSearchConfig:
                     "threads": model.threads,
                     **({"document_prefix": model.document_prefix} if model.document_prefix else {}),
                     **({"query_prefix": model.query_prefix} if model.query_prefix else {}),
+                    **({"provider": model.provider} if model.provider != "fastembed" else {}),
+                    **({"base_url": model.base_url} if model.base_url else {}),
+                    **({"api_key": model.api_key} if model.api_key else {}),
                 }
                 for name, model in self.models.items()
             },

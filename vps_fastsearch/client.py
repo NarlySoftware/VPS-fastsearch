@@ -502,7 +502,7 @@ class FastSearchClient:
 
 
 def _get_embedder_with_config() -> Embedder:
-    """Get embedder singleton with instruction prefixes loaded from config."""
+    """Get embedder singleton with full config (provider, prefixes, etc.)."""
     from .core import Embedder
 
     config = load_config()
@@ -512,6 +512,10 @@ def _get_embedder_with_config() -> Embedder:
             model_name=embedder_config.name or None,
             document_prefix=embedder_config.document_prefix,
             query_prefix=embedder_config.query_prefix,
+            provider=embedder_config.provider,
+            base_url=embedder_config.base_url,
+            api_key=embedder_config.api_key,
+            threads=embedder_config.threads,
         )
     return Embedder.get_instance()
 

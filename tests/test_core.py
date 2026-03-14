@@ -875,8 +875,6 @@ def test_embedder_stores_prefixes() -> None:
     """Embedder should store document and query prefixes."""
     from unittest.mock import MagicMock, patch
 
-    import numpy as np
-
     with patch("vps_fastsearch.core.Embedder.__init__", return_value=None):
         from vps_fastsearch.core import Embedder
 
@@ -884,25 +882,23 @@ def test_embedder_stores_prefixes() -> None:
         e.model_name = "test"
         e.document_prefix = "Doc: "
         e.query_prefix = "Query: "
-        e._model = MagicMock()
-        e._model.embed.return_value = [np.array([0.1] * 768)]
+        e._backend = MagicMock()
+        e._backend.embed.return_value = [[0.1] * 768]
 
         # embed() should prepend document prefix
         e.embed(["hello"])
-        e._model.embed.assert_called_with(["Doc: hello"])
+        e._backend.embed.assert_called_with(["Doc: hello"])
 
         # embed_query() should prepend query prefix
-        e._model.embed.reset_mock()
-        e._model.embed.return_value = [np.array([0.1] * 768)]
+        e._backend.embed.reset_mock()
+        e._backend.embed.return_value = [[0.1] * 768]
         e.embed_query("hello")
-        e._model.embed.assert_called_with(["Query: hello"])
+        e._backend.embed.assert_called_with(["Query: hello"])
 
 
 def test_embedder_empty_prefix_no_prepend() -> None:
     """Embedder with empty prefixes should not modify texts."""
     from unittest.mock import MagicMock, patch
-
-    import numpy as np
 
     with patch("vps_fastsearch.core.Embedder.__init__", return_value=None):
         from vps_fastsearch.core import Embedder
@@ -911,25 +907,23 @@ def test_embedder_empty_prefix_no_prepend() -> None:
         e.model_name = "test"
         e.document_prefix = ""
         e.query_prefix = ""
-        e._model = MagicMock()
-        e._model.embed.return_value = [np.array([0.1] * 768)]
+        e._backend = MagicMock()
+        e._backend.embed.return_value = [[0.1] * 768]
 
         # embed() should pass texts unchanged
         e.embed(["hello"])
-        e._model.embed.assert_called_with(["hello"])
+        e._backend.embed.assert_called_with(["hello"])
 
         # embed_query() should pass text unchanged
-        e._model.embed.reset_mock()
-        e._model.embed.return_value = [np.array([0.1] * 768)]
+        e._backend.embed.reset_mock()
+        e._backend.embed.return_value = [[0.1] * 768]
         e.embed_query("hello")
-        e._model.embed.assert_called_with(["hello"])
+        e._backend.embed.assert_called_with(["hello"])
 
 
 def test_embed_single_delegates_to_embed_query() -> None:
     """embed_single should use embed_query (query prefix), not embed (document prefix)."""
     from unittest.mock import MagicMock, patch
-
-    import numpy as np
 
     with patch("vps_fastsearch.core.Embedder.__init__", return_value=None):
         from vps_fastsearch.core import Embedder
@@ -938,11 +932,11 @@ def test_embed_single_delegates_to_embed_query() -> None:
         e.model_name = "test"
         e.document_prefix = "WRONG: "
         e.query_prefix = "RIGHT: "
-        e._model = MagicMock()
-        e._model.embed.return_value = [np.array([0.1] * 768)]
+        e._backend = MagicMock()
+        e._backend.embed.return_value = [[0.1] * 768]
 
         e.embed_single("test query")
-        e._model.embed.assert_called_with(["RIGHT: test query"])
+        e._backend.embed.assert_called_with(["RIGHT: test query"])
 
 
 # ---------------------------------------------------------------------------

@@ -71,11 +71,98 @@ class RerankResult(_BaseResult):
     rerank_score: float
 
 
+class _FastEmbedBackend:
+    """FastEmbed/ONNX Runtime embedding backend (default)."""
+
+    def __init__(self, model_name: str, threads: int = 2) -> None:
+        from fastembed import TextEmbedding
+
+        logger.info(f"Loading embedding model {model_name} (first run may download ~130MB)")
+        for attempt in range(3):
+            try:
+                self._model = TextEmbedding(model_name, threads=threads)
+                break
+            except Exception as e:
+                if attempt < 2 and ("connection" in str(e).lower() or "timeout" in str(e).lower()):
+                    wait = 3 * (2**attempt)
+                    logger.warning(
+                        f"Model download attempt {attempt + 1}/3 failed, retrying in {wait}s: {e}"
+                    )
+                    import time
+
+                    time.sleep(wait)
+                else:
+                    raise
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        embeddings = list(self._model.embed(texts))
+        return [emb.tolist() for emb in embeddings]
+
+
+class _OllamaBackend:
+    """Ollama embedding backend — calls /api/embeddings."""
+
+    def __init__(self, model_name: str, base_url: str = "http://localhost:11434") -> None:
+        self._model_name = model_name
+        self._base_url = base_url.rstrip("/")
+        logger.info(f"Using Ollama embedder: {model_name} at {self._base_url}")
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        import json
+        import urllib.request
+
+        results: list[list[float]] = []
+        for text in texts:
+            payload = json.dumps({"model": self._model_name, "prompt": text}).encode()
+            req = urllib.request.Request(
+                f"{self._base_url}/api/embeddings",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read())
+            results.append(data["embedding"])
+        return results
+
+
+class _HTTPBackend:
+    """OpenAI-compatible HTTP embedding backend — calls /v1/embeddings."""
+
+    def __init__(self, model_name: str, base_url: str, api_key: str = "") -> None:
+        self._model_name = model_name
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        logger.info(f"Using HTTP embedder: {model_name} at {self._base_url}")
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        import json
+        import urllib.request
+
+        payload = json.dumps({"model": self._model_name, "input": texts}).encode()
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        req = urllib.request.Request(
+            f"{self._base_url}/embeddings",
+            data=payload,
+            headers=headers,
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read())
+
+        # OpenAI format: data[].embedding, sorted by index
+        sorted_data = sorted(data["data"], key=lambda x: x["index"])
+        return [item["embedding"] for item in sorted_data]
+
+
 class Embedder:
     """
-    Embedding generator using FastEmbed with ONNX Runtime.
+    Embedding generator with pluggable backends.
 
-    Uses bge-base-en-v1.5 (768 dimensions) for fast CPU inference.
+    Supports three providers:
+    - ``fastembed`` (default): Local ONNX Runtime via FastEmbed
+    - ``ollama``: Ollama API at configurable base_url
+    - ``http``: Any OpenAI-compatible /v1/embeddings endpoint
     """
 
     MODEL_NAME = "BAAI/bge-base-en-v1.5"
@@ -90,6 +177,10 @@ class Embedder:
         model_name: str | None = None,
         document_prefix: str = "",
         query_prefix: str = "",
+        provider: str = "fastembed",
+        base_url: str = "",
+        api_key: str = "",
+        threads: int = 2,
     ) -> "Embedder":
         """Get or create a thread-safe singleton Embedder instance.
 
@@ -99,7 +190,10 @@ class Embedder:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = cls(model_name, document_prefix, query_prefix)
+                    cls._instance = cls(
+                        model_name, document_prefix, query_prefix,
+                        provider, base_url, api_key, threads,
+                    )
         return cls._instance
 
     def __init__(
@@ -107,42 +201,38 @@ class Embedder:
         model_name: str | None = None,
         document_prefix: str = "",
         query_prefix: str = "",
+        provider: str = "fastembed",
+        base_url: str = "",
+        api_key: str = "",
+        threads: int = 2,
     ) -> None:
-        from fastembed import TextEmbedding
-
         self.model_name = model_name or self.MODEL_NAME
         self.document_prefix = document_prefix
         self.query_prefix = query_prefix
-        logger.info(f"Loading embedding model {self.model_name} (first run may download ~130MB)")
-        for attempt in range(3):
-            try:
-                self._model = TextEmbedding(self.model_name, threads=2)
-                break
-            except Exception as e:
-                if attempt < 2 and ("connection" in str(e).lower() or "timeout" in str(e).lower()):
-                    wait = 3 * (2**attempt)  # 3, 6, 12 seconds
-                    logger.warning(
-                        f"Model download attempt {attempt + 1}/3 failed, retrying in {wait}s: {e}"
-                    )
-                    import time
+        self.provider = provider
 
-                    time.sleep(wait)
-                else:
-                    raise
+        self._backend: _FastEmbedBackend | _OllamaBackend | _HTTPBackend
+        if provider == "ollama":
+            self._backend = _OllamaBackend(
+                self.model_name, base_url or "http://localhost:11434"
+            )
+        elif provider == "http":
+            if not base_url:
+                raise ValueError("HTTP embedding provider requires base_url")
+            self._backend = _HTTPBackend(self.model_name, base_url, api_key)
+        else:
+            self._backend = _FastEmbedBackend(self.model_name, threads)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a list of texts (document prefix applied)."""
         if self.document_prefix:
             texts = [self.document_prefix + t for t in texts]
-        embeddings = list(self._model.embed(texts))
-        return [emb.tolist() for emb in embeddings]
+        return self._backend.embed(texts)
 
     def embed_query(self, text: str) -> list[float]:
         """Generate embedding for a query text (query prefix applied)."""
         prefixed = self.query_prefix + text if self.query_prefix else text
-        embeddings = list(self._model.embed([prefixed]))
-        result: list[float] = embeddings[0].tolist()
-        return result
+        return self._backend.embed([prefixed])[0]
 
     def embed_single(self, text: str) -> list[float]:
         """Generate embedding for a single query text (query prefix applied)."""
