@@ -819,7 +819,7 @@ def search(
                                 query,
                                 embedding,
                                 limit=limit,
-                                rerank_top_k=min(limit * 3, 100),
+                                rerank_top_k=min(limit * 5, 100),
                                 metadata_filter=metadata_filter,
                             )
                         except ImportError as e:
@@ -1272,7 +1272,7 @@ def _qmd_search(
                             query_text,
                             embedding,
                             limit=limit,
-                            rerank_top_k=min(limit * 3, 100),
+                            rerank_top_k=min(limit * 5, 100),
                             metadata_filter=metadata_filter,
                         )
                     except ImportError:
@@ -1317,12 +1317,16 @@ def _qmd_search(
                 r["_abs_source"] = _db.to_absolute(r["source"])
                 snippets[r["id"]] = _qmd_get_snippet(_db, query_text, r["id"], mode)
 
-            # Look up documents table for file paths relative to collection root
+            # Look up documents table for file paths relative to collection root.
+            # Sort collections by path length descending so sub-directory
+            # collections (e.g. workspace/memory/) match before parent
+            # collections (e.g. workspace/).
+            sorted_colls = sorted(collections, key=lambda c: len(c["path"]), reverse=True)
             for r in results:
                 src = r["source"]
                 if src not in doc_info:
                     abs_p = Path(r["_abs_source"])
-                    for coll in collections:
+                    for coll in sorted_colls:
                         coll_root = Path(coll["path"])
                         try:
                             rel = str(abs_p.relative_to(coll_root))
@@ -1452,7 +1456,7 @@ def qmd_update(ctx: click.Context) -> None:
     if not collections:
         return
 
-    for coll in collections:
+    for coll in sorted(collections, key=lambda c: len(c["path"]), reverse=True):
         coll_path = Path(coll["path"]).expanduser()
         pattern = coll.get("pattern", coll.get("mask", "**/*.md"))
         name = coll["name"]

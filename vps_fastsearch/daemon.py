@@ -523,7 +523,7 @@ class FastSearchDaemon:
                                 query,
                                 embedding,
                                 limit=limit,
-                                rerank_top_k=min(limit * 3, 100),
+                                rerank_top_k=min(limit * 5, 100),
                                 reranker=_RerankerAdapter(reranker_model.instance),
                                 metadata_filter=metadata_filter,
                             )

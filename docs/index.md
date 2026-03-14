@@ -77,4 +77,4 @@ The daemon keeps ML models loaded in memory, reducing search latency from ~800ms
 
 ## Version
 
-Current version: **0.3.3**
+Current version: **0.3.4**
