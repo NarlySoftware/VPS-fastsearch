@@ -93,23 +93,31 @@ if spec and spec.origin:
 " 2>/dev/null || true)
     VEC_SO="${VEC_PKG_DIR:+$VEC_PKG_DIR/vec0.so}"
 
-    if [ -n "$VEC_SO" ] && [ -f "$VEC_SO" ] && file "$VEC_SO" | grep -q "ELF 32-bit"; then
-        echo "  Detected 32-bit vec0.so on ARM64 — rebuilding from source..."
-        BUILD_DIR=$(mktemp -d /tmp/sqlite-vec-build.XXXXXX)
-        trap "rm -rf '$BUILD_DIR'" EXIT
-        git clone --depth 1 --branch v0.1.6 https://github.com/asg017/sqlite-vec.git "$BUILD_DIR"
-        (cd "$BUILD_DIR" && make loadable)
-        cp "$BUILD_DIR/dist/vec0.so" "$VEC_SO"
-        echo "  Replaced vec0.so with native ARM64 build"
-        # Re-verify after rebuild
-        if "$VENV_DIR/bin/python" -c "import sqlite_vec" 2>/dev/null; then
-            echo "  sqlite-vec now loads correctly"
-            NATIVE_OK=true
+    echo "  Architecture: $ARCH"
+    if [ -n "$VEC_SO" ] && [ -f "$VEC_SO" ]; then
+        VEC_ELF=$(file "$VEC_SO" 2>/dev/null || echo "unknown")
+        if echo "$VEC_ELF" | grep -q "ELF 32-bit"; then
+            echo "  Checking vec0.so... ELF 32-bit ✗ — rebuilding from source for ARM64..."
+            BUILD_DIR=$(mktemp -d /tmp/sqlite-vec-build.XXXXXX)
+            trap "rm -rf '$BUILD_DIR'" EXIT
+            git clone --depth 1 --branch v0.1.6 https://github.com/asg017/sqlite-vec.git "$BUILD_DIR"
+            (cd "$BUILD_DIR" && make loadable)
+            cp "$BUILD_DIR/dist/vec0.so" "$VEC_SO"
+            echo "  Replaced vec0.so with native ARM64 build ✓"
+            # Re-verify after rebuild
+            if "$VENV_DIR/bin/python" -c "import sqlite_vec" 2>/dev/null; then
+                echo "  sqlite-vec now loads correctly ✓"
+                NATIVE_OK=true
+            else
+                echo "  ERROR: sqlite-vec still fails to load after rebuild"
+            fi
+        elif echo "$VEC_ELF" | grep -q "ELF 64-bit"; then
+            echo "  Checking vec0.so... ELF 64-bit ✓ (native ARM64, no fix needed)"
         else
-            echo "  ERROR: sqlite-vec still fails to load after rebuild"
+            echo "  Checking vec0.so... unable to determine format: $VEC_ELF"
         fi
     elif [ "$NATIVE_OK" = true ]; then
-        echo "  sqlite-vec vec0.so is native ARM64, no fix needed"
+        echo "  sqlite-vec OK (vec0.so not found at expected path, but import works)"
     fi
 fi
 
@@ -170,13 +178,36 @@ mkdir -p "$SYSTEMD_USER_DIR"
 
 if [ -f "$INSTALL_DIR/vps-fastsearch.service" ]; then
     cp "$INSTALL_DIR/vps-fastsearch.service" "$SYSTEMD_USER_DIR/vps-fastsearch.service"
-    echo "  Installed service to $SYSTEMD_USER_DIR/vps-fastsearch.service"
+    echo "  Installed daemon service"
+
+    # Install timer units and indexer script
+    for unit in fastsearch-index-incremental.service fastsearch-index-incremental.timer \
+                fastsearch-index-full.service fastsearch-index-full.timer; do
+        if [ -f "$INSTALL_DIR/$unit" ]; then
+            cp "$INSTALL_DIR/$unit" "$SYSTEMD_USER_DIR/$unit"
+            echo "  Installed $unit"
+        fi
+    done
+
+    # Copy indexer script to scripts/
+    if [ -f "$INSTALL_DIR/scripts/fastsearch_indexer.py" ]; then
+        mkdir -p "$INSTALL_DIR/scripts"
+        cp "$INSTALL_DIR/scripts/fastsearch_indexer.py" "$INSTALL_DIR/scripts/fastsearch_indexer.py"
+        echo "  Indexer script at $INSTALL_DIR/scripts/fastsearch_indexer.py"
+    fi
 
     # Enable and start the service if systemctl --user is available
     if systemctl --user daemon-reload 2>/dev/null; then
         systemctl --user enable vps-fastsearch.service 2>/dev/null && \
             echo "  Enabled vps-fastsearch service" || \
             echo "  Could not enable service (systemd user session may not be available)"
+
+        # Enable timers
+        for timer in fastsearch-index-incremental.timer fastsearch-index-full.timer; do
+            systemctl --user enable "$timer" 2>/dev/null && \
+                echo "  Enabled $timer" || true
+        done
+
         echo "  Start with: systemctl --user start vps-fastsearch"
     else
         echo "  systemctl --user not available (enable manually after login)"

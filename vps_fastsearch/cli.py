@@ -882,5 +882,332 @@ def migrate_paths(
         db.close()
 
 
+# ============================================================================
+# QMD Protocol Commands (OpenClaw integration)
+# ============================================================================
+
+_COLLECTIONS_META_KEY = "qmd_collections"
+
+
+def _load_collections(db: SearchDB) -> list[dict[str, str]]:
+    """Load registered QMD collections from db_meta."""
+    raw = db.get_meta(_COLLECTIONS_META_KEY)
+    if raw:
+        return list(orjson.loads(raw))
+    return []
+
+
+def _save_collections(db: SearchDB, collections: list[dict[str, str]]) -> None:
+    """Save QMD collections to db_meta."""
+    db.set_meta(_COLLECTIONS_META_KEY, orjson.dumps(collections).decode())
+
+
+def _qmd_search(
+    ctx: click.Context,
+    query_text: str,
+    limit: int,
+    collection: str | None,
+    mode: str,
+) -> None:
+    """Shared implementation for QMD search commands (query, search, vector_search)."""
+    db_path = ctx.obj["db_path"]
+    config_path = ctx.obj.get("config_path")
+
+    # Build metadata filter for collection
+    metadata_filter: dict[str, Any] | None = None
+    if collection:
+        metadata_filter = {"collection": collection}
+
+    # Try daemon first
+    use_daemon = False
+    client = None
+    try:
+        client = FastSearchClient(config_path=config_path, timeout=30.0)
+        if client.ping():
+            use_daemon = True
+    except (OSError, ConnectionError, TimeoutError):
+        pass
+
+    try:
+        if use_daemon:
+            assert client is not None
+            try:
+                result = client.search(
+                    query=query_text,
+                    db_path=db_path,
+                    limit=limit,
+                    mode=mode,
+                    metadata_filter=metadata_filter,
+                )
+                results = result.get("results", [])
+            finally:
+                client.close()
+                client = None
+        else:
+            if not Path(db_path).exists():
+                click.echo("no results found.", err=True)
+                return
+            db = SearchDB(db_path)
+            try:
+                if mode == "bm25":
+                    results = db.search_bm25(
+                        query_text, limit=limit, metadata_filter=metadata_filter
+                    )
+                elif mode == "vector":
+                    embedder = Embedder.get_instance()
+                    embedding = embedder.embed_single(query_text)
+                    results = db.search_vector(
+                        embedding, limit=limit, metadata_filter=metadata_filter
+                    )
+                else:  # hybrid
+                    embedder = Embedder.get_instance()
+                    embedding = embedder.embed_single(query_text)
+                    results = db.search_hybrid(
+                        query_text, embedding, limit=limit, metadata_filter=metadata_filter
+                    )
+            finally:
+                db.close()
+    finally:
+        if client is not None:
+            client.close()
+
+    if not results:
+        click.echo("no results found.")
+        return
+
+    # Format as QMD JSON output
+    qmd_results: list[dict[str, Any]] = []
+    for r in results:
+        score = r.get("rrf_score", r.get("score", 0.0))
+        if "distance" in r:
+            # Convert cosine distance to similarity score (1 - distance)
+            score = max(0.0, 1.0 - r["distance"])
+        qmd_results.append({
+            "file": r["source"],
+            "collection": r.get("metadata", {}).get("collection", collection or ""),
+            "docid": str(r["id"]),
+            "score": round(score, 4),
+            "snippet": r["content"][:500],
+        })
+
+    click.echo(orjson.dumps(qmd_results, option=orjson.OPT_INDENT_2).decode())
+
+
+@cli.command("query")
+@click.argument("query_text")
+@click.option("-n", "limit", default=10, help="Number of results")
+@click.option("-c", "collection", default=None, help="Collection name filter")
+@click.option("--json", "output_json", is_flag=True, hidden=True, help="JSON output (always on)")
+@click.pass_context
+def qmd_query(
+    ctx: click.Context, query_text: str, limit: int, collection: str | None, output_json: bool
+) -> None:
+    """BM25/keyword search (QMD protocol)."""
+    _qmd_search(ctx, query_text, limit, collection, mode="bm25")
+
+
+@cli.command("vector_search")
+@click.argument("query_text")
+@click.option("-n", "limit", default=10, help="Number of results")
+@click.option("-c", "collection", default=None, help="Collection name filter")
+@click.option("--json", "output_json", is_flag=True, hidden=True, help="JSON output (always on)")
+@click.pass_context
+def qmd_vector_search(
+    ctx: click.Context, query_text: str, limit: int, collection: str | None, output_json: bool
+) -> None:
+    """Vector/semantic search (QMD protocol)."""
+    _qmd_search(ctx, query_text, limit, collection, mode="vector")
+
+
+@cli.command("update")
+@click.pass_context
+def qmd_update(ctx: click.Context) -> None:
+    """Reindex all registered collections (QMD protocol)."""
+    db_path = ctx.obj["db_path"]
+
+    if not Path(db_path).exists():
+        # No DB yet — nothing to update
+        return
+
+    db = SearchDB(db_path)
+    try:
+        collections = _load_collections(db)
+    finally:
+        db.close()
+
+    if not collections:
+        return
+
+    for coll in collections:
+        coll_path = Path(coll["path"]).expanduser()
+        pattern = coll.get("pattern", coll.get("mask", "**/*.md"))
+        name = coll["name"]
+
+        if not coll_path.is_dir():
+            continue
+
+        files = list(coll_path.rglob(pattern))
+        if not files:
+            continue
+
+        for file_path in files:
+            try:
+                content = file_path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+
+            if file_path.suffix.lower() == ".md":
+                chunks = list(chunk_markdown(content))
+            else:
+                chunks = [(c, {}) for c in chunk_text(content)]
+
+            if not chunks:
+                continue
+
+            # Use daemon if available, else direct
+            try:
+                client = FastSearchClient(config_path=ctx.obj.get("config_path"), timeout=60.0)
+                try:
+                    if client.ping():
+                        texts = [c[0] for c in chunks]
+                        EMBED_BATCH_SIZE = 10
+                        embeddings: list[list[float]] = []
+                        for batch_start in range(0, len(texts), EMBED_BATCH_SIZE):
+                            batch = texts[batch_start : batch_start + EMBED_BATCH_SIZE]
+                            result = client.embed(batch)
+                            embeddings.extend(result.get("embeddings", []))
+                    else:
+                        raise ConnectionError
+                finally:
+                    client.close()
+            except (OSError, ConnectionError, TimeoutError, Exception):
+                embedder = Embedder.get_instance()
+                texts = [c[0] for c in chunks]
+                embeddings = []
+                EMBED_BATCH_SIZE = 10
+                for batch_start in range(0, len(texts), EMBED_BATCH_SIZE):
+                    batch = texts[batch_start : batch_start + EMBED_BATCH_SIZE]
+                    embeddings.extend(embedder.embed(batch))
+
+            db = SearchDB(db_path)
+            try:
+                source = db.to_relative(file_path.resolve())
+                items: list[tuple[str, int, str, list[float], dict[str, Any] | None]] = []
+                for i, ((text, metadata), embedding) in enumerate(
+                    zip(chunks, embeddings, strict=True)
+                ):
+                    meta = dict(metadata) if metadata else {}
+                    meta["collection"] = name
+                    items.append((source, i, text, embedding, meta))
+                db.index_batch(items)
+            finally:
+                db.close()
+
+
+@cli.command("embed")
+@click.pass_context
+def qmd_embed(ctx: click.Context) -> None:
+    """Run embedding pass (QMD protocol). No-op — embeddings are generated during update."""
+    pass
+
+
+# ============================================================================
+# QMD Collection Management
+# ============================================================================
+
+
+@cli.group()
+def collection() -> None:
+    """Manage QMD collections (OpenClaw integration)."""
+    pass
+
+
+@collection.command("add")
+@click.argument("path")
+@click.option("--name", required=True, help="Collection name")
+@click.option("--mask", required=True, help="Glob pattern for files")
+@click.pass_context
+def collection_add(ctx: click.Context, path: str, name: str, mask: str) -> None:
+    """Register a collection path for QMD indexing."""
+    db_path = ctx.obj["db_path"]
+
+    # Ensure DB exists
+    db = SearchDB(db_path)
+    try:
+        collections = _load_collections(db)
+
+        # Check if name already exists
+        for coll in collections:
+            if coll["name"] == name:
+                click.echo(f"Collection '{name}' already exists", err=True)
+                sys.exit(1)
+
+        collections.append({"name": name, "path": str(Path(path).resolve()), "pattern": mask})
+        _save_collections(db, collections)
+        click.echo(f"Added collection '{name}': {path} ({mask})")
+    finally:
+        db.close()
+
+
+@collection.command("remove")
+@click.argument("name")
+@click.pass_context
+def collection_remove(ctx: click.Context, name: str) -> None:
+    """Remove a registered collection."""
+    db_path = ctx.obj["db_path"]
+
+    if not Path(db_path).exists():
+        click.echo(f"Collection '{name}' not found", err=True)
+        sys.exit(1)
+
+    db = SearchDB(db_path)
+    try:
+        collections = _load_collections(db)
+        new_collections = [c for c in collections if c["name"] != name]
+
+        if len(new_collections) == len(collections):
+            click.echo(f"Collection '{name}' does not exist", err=True)
+            sys.exit(1)
+
+        _save_collections(db, new_collections)
+        click.echo(f"Removed collection '{name}'")
+    finally:
+        db.close()
+
+
+@collection.command("list")
+@click.option("--json", "output_json", is_flag=True, help="Output as JSON")
+@click.pass_context
+def collection_list(ctx: click.Context, output_json: bool) -> None:
+    """List registered collections."""
+    db_path = ctx.obj["db_path"]
+
+    if not Path(db_path).exists():
+        if output_json:
+            click.echo("[]")
+        else:
+            click.echo("No collections registered.")
+        return
+
+    db = SearchDB(db_path)
+    try:
+        collections = _load_collections(db)
+
+        if output_json:
+            click.echo(orjson.dumps(collections, option=orjson.OPT_INDENT_2).decode())
+        else:
+            if not collections:
+                click.echo("No collections registered.")
+            else:
+                for coll in collections:
+                    pattern = coll.get("pattern", coll.get("mask", ""))
+                    click.echo(f"{coll['name']} (qmd://{coll['name']})")
+                    click.echo(f"  path: {coll['path']}")
+                    click.echo(f"  pattern: {pattern}")
+                    click.echo()
+    finally:
+        db.close()
+
+
 if __name__ == "__main__":
     cli()

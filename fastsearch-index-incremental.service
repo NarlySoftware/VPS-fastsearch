@@ -5,6 +5,6 @@ Wants=vps-fastsearch.service
 
 [Service]
 Type=oneshot
-ExecStart=%h/fastsearch/.venv/bin/python3 %h/.openclaw/workspace/scripts/fastsearch_index.py --mode incremental
+ExecStart=%h/fastsearch/.venv/bin/python3 %h/fastsearch/scripts/fastsearch_indexer.py --mode incremental
 Environment="FASTSEARCH_CONFIG=%h/.config/fastsearch/config.yaml"
 Environment="FASTSEARCH_DB=%h/.local/share/fastsearch/fastsearch.db"
