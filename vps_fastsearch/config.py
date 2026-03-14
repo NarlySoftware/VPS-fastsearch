@@ -41,6 +41,8 @@ class ModelConfig:
     keep_loaded: Literal["always", "on_demand", "never"] = "on_demand"
     idle_timeout_seconds: int = 300
     threads: int = 2
+    document_prefix: str = ""
+    query_prefix: str = ""
 
 
 @dataclass
@@ -124,11 +126,22 @@ class FastSearchConfig:
                 if not isinstance(threads, int) or threads < 1:
                     logger.warning(f"Invalid threads: {threads!r}, using default 2")
                     threads = 2
+                # Instruction prefixes for embedding models
+                doc_prefix = model_data.get("document_prefix", "")
+                query_prefix = model_data.get("query_prefix", "")
+                # Also accept nested instruction_prefix dict
+                prefix_data = model_data.get("instruction_prefix", {})
+                if isinstance(prefix_data, dict):
+                    doc_prefix = doc_prefix or prefix_data.get("document", "")
+                    query_prefix = query_prefix or prefix_data.get("query", "")
+
                 models[name] = ModelConfig(
                     name=model_data.get("name", ""),
                     keep_loaded=keep_loaded,
                     idle_timeout_seconds=idle_timeout,
                     threads=threads,
+                    document_prefix=str(doc_prefix),
+                    query_prefix=str(query_prefix),
                 )
 
         memory_data = data.get("memory", {})
@@ -195,6 +208,8 @@ class FastSearchConfig:
                     "keep_loaded": model.keep_loaded,
                     "idle_timeout_seconds": model.idle_timeout_seconds,
                     "threads": model.threads,
+                    **({"document_prefix": model.document_prefix} if model.document_prefix else {}),
+                    **({"query_prefix": model.query_prefix} if model.query_prefix else {}),
                 }
                 for name, model in self.models.items()
             },

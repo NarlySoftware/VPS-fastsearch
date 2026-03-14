@@ -85,7 +85,12 @@ class Embedder:
     _lock: threading.Lock = threading.Lock()
 
     @classmethod
-    def get_instance(cls, model_name: str | None = None) -> "Embedder":
+    def get_instance(
+        cls,
+        model_name: str | None = None,
+        document_prefix: str = "",
+        query_prefix: str = "",
+    ) -> "Embedder":
         """Get or create a thread-safe singleton Embedder instance.
 
         Uses double-checked locking to avoid acquiring the lock on every call.
@@ -94,13 +99,20 @@ class Embedder:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = cls(model_name)
+                    cls._instance = cls(model_name, document_prefix, query_prefix)
         return cls._instance
 
-    def __init__(self, model_name: str | None = None) -> None:
+    def __init__(
+        self,
+        model_name: str | None = None,
+        document_prefix: str = "",
+        query_prefix: str = "",
+    ) -> None:
         from fastembed import TextEmbedding
 
         self.model_name = model_name or self.MODEL_NAME
+        self.document_prefix = document_prefix
+        self.query_prefix = query_prefix
         logger.info(f"Loading embedding model {self.model_name} (first run may download ~130MB)")
         for attempt in range(3):
             try:
@@ -119,14 +131,22 @@ class Embedder:
                     raise
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for a list of texts."""
-        # fastembed returns a generator, convert to list
+        """Generate embeddings for a list of texts (document prefix applied)."""
+        if self.document_prefix:
+            texts = [self.document_prefix + t for t in texts]
         embeddings = list(self._model.embed(texts))
         return [emb.tolist() for emb in embeddings]
 
+    def embed_query(self, text: str) -> list[float]:
+        """Generate embedding for a query text (query prefix applied)."""
+        prefixed = self.query_prefix + text if self.query_prefix else text
+        embeddings = list(self._model.embed([prefixed]))
+        result: list[float] = embeddings[0].tolist()
+        return result
+
     def embed_single(self, text: str) -> list[float]:
-        """Generate embedding for a single text."""
-        return self.embed([text])[0]
+        """Generate embedding for a single query text (query prefix applied)."""
+        return self.embed_query(text)
 
 
 def get_embedder() -> Embedder:

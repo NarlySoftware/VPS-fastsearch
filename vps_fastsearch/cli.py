@@ -18,6 +18,19 @@ from .core import Embedder, SearchDB
 logger = logging.getLogger(__name__)
 
 
+def _get_embedder(config_path: str | None = None) -> Embedder:
+    """Get embedder singleton with instruction prefixes from config."""
+    cfg = load_config(config_path)
+    embedder_config = cfg.models.get("embedder")
+    if embedder_config:
+        return Embedder.get_instance(
+            model_name=embedder_config.name or None,
+            document_prefix=embedder_config.document_prefix,
+            query_prefix=embedder_config.query_prefix,
+        )
+    return Embedder.get_instance()
+
+
 @click.group()
 @click.version_option(version=__version__, prog_name="vps-fastsearch")
 @click.option("--db", default=DEFAULT_DB_PATH, help="Database path", envvar="FASTSEARCH_DB")
@@ -148,6 +161,148 @@ def daemon_reload(ctx: click.Context, config_path: str | None) -> None:
 
 
 # ============================================================================
+# Model Commands
+# ============================================================================
+
+
+@cli.group()
+def model() -> None:
+    """Manage embedding models."""
+    pass
+
+
+@model.command("swap")
+@click.argument("model_name")
+@click.option("--reindex", is_flag=True, help="Re-embed all documents after swapping")
+@click.pass_context
+def model_swap(ctx: click.Context, model_name: str, reindex: bool) -> None:
+    """Swap the embedding model and optionally re-embed all documents.
+
+    Updates the config file, notifies the daemon (if running), and optionally
+    re-indexes all documents with the new model.
+    """
+    config_path = ctx.obj.get("config_path")
+    db_path = ctx.obj["db_path"]
+
+    # Load and update config
+    cfg = load_config(config_path)
+    old_model = cfg.models.get("embedder")
+    old_name = old_model.name if old_model else "none"
+
+    if old_name == model_name and not reindex:
+        click.echo(f"Already using model '{model_name}'. Use --reindex to force re-embedding.")
+        return
+
+    click.echo(f"Swapping model: {old_name} -> {model_name}")
+
+    # Update config file on disk
+    target_path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
+    if target_path.exists():
+        try:
+            import yaml
+
+            raw = yaml.safe_load(target_path.read_text()) or {}
+        except ImportError:
+            raw = {}
+    else:
+        raw = {}
+
+    raw.setdefault("models", {}).setdefault("embedder", {})["name"] = model_name
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import yaml
+
+        target_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False))
+    except ImportError:
+        # Fallback: write minimal config
+        target_path.write_text(f"models:\n  embedder:\n    name: {model_name}\n")
+    click.echo(f"  Config updated: {target_path}")
+
+    # Notify daemon if running
+    try:
+        client = FastSearchClient(config_path=config_path, timeout=10.0)
+        try:
+            if client.ping():
+                client.unload_model("embedder")
+                click.echo("  Daemon: unloaded old model")
+                client.reload_config(config_path)
+                click.echo("  Daemon: config reloaded")
+                client.load_model("embedder")
+                click.echo("  Daemon: loaded new model")
+        finally:
+            client.close()
+    except (OSError, ConnectionError, TimeoutError, DaemonNotRunningError):
+        click.echo("  Daemon not running (will use new model on next start)")
+
+    if not reindex:
+        click.echo(
+            "\nModel swapped. Run 'vps-fastsearch model swap "
+            f"{model_name} --reindex' to re-embed existing documents."
+        )
+        return
+
+    # Re-index all documents with the new model
+    if not Path(db_path).exists():
+        click.echo("\nNo database found — nothing to reindex.")
+        return
+
+    click.echo("\nRe-indexing all documents with new model...")
+
+    # Reset the embedder singleton so it picks up the new model
+    Embedder._instance = None
+
+    db = SearchDB(db_path)
+    try:
+        # Get all documents
+        rows = list(
+            db._execute("SELECT id, source, chunk_index, content, metadata FROM docs ORDER BY id")
+        )
+
+        if not rows:
+            click.echo("  No documents to reindex.")
+            return
+
+        click.echo(f"  {len(rows)} chunks to re-embed")
+
+        # Clear vector table and update embedding dims
+        db._execute("DELETE FROM docs_vec")
+        db._execute(
+            "INSERT OR REPLACE INTO db_meta (key, value) VALUES ('embedding_dims', ?)",
+            (str(db.EMBEDDING_DIM),),
+        )
+
+        # Load new embedder
+        embedder = _get_embedder(config_path)
+
+        # Re-embed in batches with progress
+        BATCH_SIZE = 10
+        done = 0
+        for batch_start in range(0, len(rows), BATCH_SIZE):
+            batch = rows[batch_start : batch_start + BATCH_SIZE]
+            texts = [row[3] for row in batch]  # content column
+            embeddings = embedder.embed(texts)
+
+            with db._transaction():
+                for (doc_id, _source, _chunk_idx, _content, _metadata), embedding in zip(
+                    batch, embeddings, strict=True
+                ):
+                    import sqlite_vec
+
+                    db._execute(
+                        "INSERT INTO docs_vec (id, embedding) VALUES (?, ?)",
+                        (doc_id, sqlite_vec.serialize_float32(embedding)),
+                    )
+
+            done += len(batch)
+            pct = done * 100 // len(rows)
+            click.echo(f"  [{pct:3d}%] {done}/{len(rows)} chunks re-embedded", nl=True)
+
+        click.echo(f"\nDone — {len(rows)} chunks re-embedded with '{model_name}'.")
+    finally:
+        db.close()
+
+
+# ============================================================================
 # Config Commands
 # ============================================================================
 
@@ -237,7 +392,7 @@ def index(
             if not use_daemon:
                 click.echo("Loading embedding model...", nl=False)
                 t0 = time.perf_counter()
-                embedder = Embedder.get_instance()
+                embedder = _get_embedder(ctx.obj.get("config_path"))
                 model_time = time.perf_counter() - t0
                 click.echo(f" done ({model_time:.2f}s)")
 
@@ -547,13 +702,13 @@ def search(
                 if mode == "bm25":
                     results = db.search_bm25(query, limit=limit, metadata_filter=metadata_filter)
                 elif mode == "vector":
-                    embedder = Embedder.get_instance()
+                    embedder = _get_embedder(config_path)
                     embedding = embedder.embed_single(query)
                     results = db.search_vector(
                         embedding, limit=limit, metadata_filter=metadata_filter
                     )
                 else:  # hybrid
-                    embedder = Embedder.get_instance()
+                    embedder = _get_embedder(config_path)
                     embedding = embedder.embed_single(query)
 
                     if rerank:
@@ -954,13 +1109,13 @@ def _qmd_search(
                         query_text, limit=limit, metadata_filter=metadata_filter
                     )
                 elif mode == "vector":
-                    embedder = Embedder.get_instance()
+                    embedder = _get_embedder(config_path)
                     embedding = embedder.embed_single(query_text)
                     results = db.search_vector(
                         embedding, limit=limit, metadata_filter=metadata_filter
                     )
                 else:  # hybrid
-                    embedder = Embedder.get_instance()
+                    embedder = _get_embedder(config_path)
                     embedding = embedder.embed_single(query_text)
                     results = db.search_hybrid(
                         query_text, embedding, limit=limit, metadata_filter=metadata_filter
@@ -1112,7 +1267,7 @@ def qmd_update(ctx: click.Context) -> None:
                 finally:
                     client.close()
             except (OSError, ConnectionError, TimeoutError, Exception):
-                embedder = Embedder.get_instance()
+                embedder = _get_embedder(ctx.obj.get("config_path"))
                 texts = [c[0] for c in chunks]
                 embeddings = []
                 EMBED_BATCH_SIZE = 10
