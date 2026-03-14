@@ -401,13 +401,19 @@ class SearchDB:
         sql = " AND " + " AND ".join(clauses)
         return sql, tuple(params)
 
-    def __init__(self, db_path: str | Path | None = None, embedding_dim: int | None = None) -> None:
+    def __init__(
+        self,
+        db_path: str | Path | None = None,
+        embedding_dim: int | None = None,
+        skip_dim_check: bool = False,
+    ) -> None:
         if db_path is None:
             from .config import DEFAULT_DB_PATH
 
             db_path = os.environ.get("FASTSEARCH_DB", DEFAULT_DB_PATH)
         if embedding_dim is not None:
             self.EMBEDDING_DIM = embedding_dim
+        self._skip_dim_check = skip_dim_check
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = apsw.Connection(str(self.db_path))
@@ -529,7 +535,8 @@ class SearchDB:
         """)
 
         self._check_schema_version()
-        self._check_embedding_dims()
+        if not self._skip_dim_check:
+            self._check_embedding_dims()
 
     def _check_schema_version(self) -> None:
         """Check and update database schema version using PRAGMA user_version."""

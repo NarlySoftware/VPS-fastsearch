@@ -458,7 +458,9 @@ class FastSearchDaemon:
                     evicted_db.close()
                 except Exception as e:
                     logger.warning(f"Error closing evicted DB {oldest_key}: {e}")
-            self._db_cache[key] = (SearchDB(str(resolved)), threading.Lock())
+            embedder_cfg = self.config.models.get("embedder")
+            edim = embedder_cfg.embedding_dim if embedder_cfg else 768
+            self._db_cache[key] = (SearchDB(str(resolved), embedding_dim=edim), threading.Lock())
         return self._db_cache[key]
 
     async def _handle_search(self, params: dict[str, Any]) -> dict[str, Any]:

@@ -113,11 +113,16 @@ def cli(ctx: click.Context, db: str, config_path: str | None) -> None:
     ctx.obj["embedding_dim"] = embedder_cfg.embedding_dim if embedder_cfg else 768
 
 
-def _make_searchdb(ctx: click.Context, db_path: str | None = None) -> SearchDB:
+def _make_searchdb(
+    ctx: click.Context,
+    db_path: str | None = None,
+    skip_dim_check: bool = False,
+) -> SearchDB:
     """Create a SearchDB with the configured embedding_dim."""
     return SearchDB(
         db_path or ctx.obj["db_path"],
         embedding_dim=ctx.obj.get("embedding_dim", 768),
+        skip_dim_check=skip_dim_check,
     )
 
 
@@ -327,7 +332,17 @@ def model_swap(ctx: click.Context, model_name: str, reindex: bool) -> None:
     # Reset the embedder singleton so it picks up the new model
     Embedder._instance = None
 
-    db = _make_searchdb(ctx)
+    # Load new embedder and detect its dimensions
+    embedder = _get_embedder(config_path)
+    click.echo("  Checking new model dimensions...", nl=False)
+    test_embedding = embedder.embed(["dimension check"])
+    new_dims = len(test_embedding[0])
+    click.echo(f" {new_dims}-dim")
+
+    # Reload config with new embedding_dim so SearchDB uses the right value
+    ctx.obj["embedding_dim"] = new_dims
+
+    db = _make_searchdb(ctx, skip_dim_check=True)
     try:
         # Get all documents
         rows = list(
@@ -340,29 +355,20 @@ def model_swap(ctx: click.Context, model_name: str, reindex: bool) -> None:
 
         click.echo(f"  {len(rows)} chunks to re-embed")
 
-        # Load new embedder and validate dimensions
-        embedder = _get_embedder(config_path)
-        click.echo("  Checking new model dimensions...", nl=False)
-        test_embedding = embedder.embed(["dimension check"])
-        new_dims = len(test_embedding[0])
-        click.echo(f" {new_dims}-dim")
-
-        if new_dims != db.EMBEDDING_DIM:
-            click.echo(
-                f"\n  ERROR: Model '{model_name}' produces {new_dims}-dim embeddings, "
-                f"but VPS-FastSearch requires {db.EMBEDDING_DIM}-dim.\n"
-                f"  The vector table schema is fixed at {db.EMBEDDING_DIM} dimensions.\n"
-                f"  Choose a compatible model (e.g., BAAI/bge-base-en-v1.5 for 768-dim).",
-                err=True,
+        # Drop and recreate vec table with new dimensions
+        db._execute("DROP TABLE IF EXISTS chunks_vec")
+        db._execute(f"""
+            CREATE VIRTUAL TABLE chunks_vec USING vec0(
+                id INTEGER PRIMARY KEY,
+                embedding float32[{new_dims}]
             )
-            sys.exit(1)
-
-        # Clear vector table and update embedding dims
-        db._execute("DELETE FROM chunks_vec")
+        """)
         db._execute(
             "INSERT OR REPLACE INTO db_meta (key, value) VALUES ('embedding_dims', ?)",
             (str(new_dims),),
         )
+        # Update instance EMBEDDING_DIM to match new table
+        db.EMBEDDING_DIM = new_dims
 
         # Re-embed in batches with progress
         import sqlite_vec
