@@ -185,6 +185,26 @@ else
     echo "  Service file not found, skipping"
 fi
 
+# ---- Step 8b: Check loginctl linger for boot persistence ----
+echo "[8b/8] Checking systemd linger status..."
+
+if command -v loginctl >/dev/null 2>&1; then
+    CURRENT_USER=$(whoami)
+    if loginctl show-user "$CURRENT_USER" 2>/dev/null | grep -q "Linger=yes"; then
+        echo "  Linger already enabled for $CURRENT_USER"
+    else
+        echo "  WARNING: Linger is NOT enabled for $CURRENT_USER"
+        echo "  Without linger, the daemon and timers will stop at logout"
+        echo "  and will NOT start at boot."
+        echo ""
+        echo "  To enable (requires sudo):"
+        echo "    sudo loginctl enable-linger $CURRENT_USER"
+        echo ""
+    fi
+else
+    echo "  loginctl not found, skipping linger check"
+fi
+
 # ---- Done ----
 echo ""
 echo "=== VPS-FastSearch installed successfully ==="

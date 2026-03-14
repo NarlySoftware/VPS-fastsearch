@@ -272,6 +272,19 @@ vps-fastsearch search "test" --json
    sudo swapon /swapfile
    ```
 
+### OOM during indexing on ARM64
+
+**Symptom:** The daemon or CLI is killed by the OOM killer while indexing large files on ARM64/aarch64 VPS instances.
+
+**Cause:** ONNX Runtime allocates more memory per embedding call on ARM64. Large files produce many chunks, and embedding them all at once exhausts RAM.
+
+**Solutions:**
+
+1. **Use the CLI** — it automatically batches embed calls in groups of 10
+2. **Use the daemon** — the daemon caps embed batches at 256, but on 2GB ARM64 instances even this may be too high. Set `memory.max_ram_mb: 2000` in config
+3. **Custom indexers** — keep embed batch sizes to 5–10 texts per call
+4. **Skip large files** — raw conversation logs are often large and redundant if a conversation manager already handles history
+
 ---
 
 ## Memory Issues

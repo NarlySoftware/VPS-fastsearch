@@ -14,6 +14,21 @@ This guide covers deploying VPS-FastSearch in production environments, including
 | Python | 3.10+ | 3.11+ |
 | OS | Linux (glibc) | Debian 12/13, Ubuntu 22.04+ |
 
+### ARM64 / aarch64 Notes
+
+ARM64 VPS instances (e.g. Oracle Cloud, Hetzner CAX, AWS Graviton) work well but
+have two caveats:
+
+- **Embedding batch size:** ONNX Runtime allocates heavily on ARM64. The CLI
+  automatically batches embed calls in groups of 10, but if you write a custom
+  indexer, keep batches small (5–10 texts). Sending 50+ texts at once can exhaust
+  RAM on 2GB instances.
+- **sqlite-vec:** The `sqlite-vec` 0.1.6 pip wheel ships a 32-bit `vec0.so` on
+  ARM64 (upstream bug #211). `install.sh` detects and rebuilds it automatically.
+  If installing manually, use `sqlite-vec==0.1.7a10` or build from source.
+- **Recommended config:** Set `memory.max_ram_mb: 2000` and use `bge-base` (not
+  `bge-large`) on 2GB instances.
+
 ### Memory by Configuration
 
 | Configuration | RAM Usage |
@@ -232,6 +247,9 @@ systemctl --user enable --now fastsearch-index-full.timer
 
 # Verify timers are active
 systemctl --user list-timers
+
+# IMPORTANT: Enable linger so services survive logout and start at boot
+sudo loginctl enable-linger $(whoami)
 ```
 
 ### System-Level Installation
