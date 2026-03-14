@@ -55,20 +55,50 @@ daemon:
 models:
   # Embedding model (required for vector search)
   embedder:
-    # Model name (HuggingFace identifier)
+    # Model name (HuggingFace identifier or provider-specific name)
     # Default: BAAI/bge-base-en-v1.5 (768 dimensions, ~450MB)
     # Alternatives:
     #   - BAAI/bge-small-en-v1.5 (384 dims, ~130MB, faster)
     #   - BAAI/bge-large-en-v1.5 (1024 dims, ~1.2GB, better quality)
     name: "BAAI/bge-base-en-v1.5"
-    
+
+    # Embedding provider:
+    #   - fastembed: Local ONNX inference via FastEmbed (default)
+    #   - ollama: Ollama embedding API
+    #   - http: Generic OpenAI-compatible HTTP endpoint
+    # Default: fastembed
+    provider: fastembed
+
     # Loading strategy:
     #   - always: Load at daemon start, never unload
     #   - on_demand: Load when needed, unload after idle timeout
     #   - never: Disable this model slot
     # Default: always
     keep_loaded: always
-    
+
+    # Number of CPU threads for inference (fastembed only)
+    # Default: 2
+    threads: 2
+
+    # Embedding dimensions (must match model output)
+    # Default: 768
+    embedding_dim: 768
+
+    # Text prefixes prepended during indexing and searching
+    # Default: "" (empty)
+    document_prefix: ""
+    query_prefix: ""
+
+    # Base URL for ollama/http providers
+    # Required for ollama and http, ignored for fastembed
+    # Default: "" (empty)
+    base_url: ""
+
+    # API key for http provider authentication
+    # Optional, only used by http provider
+    # Default: "" (empty)
+    api_key: ""
+
     # Seconds of idle time before auto-unload (on_demand only)
     # 0 = never auto-unload
     # Default: 0
@@ -128,8 +158,15 @@ Defines model slots and their behavior.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `name` | string | `BAAI/bge-base-en-v1.5` | HuggingFace model name |
+| `name` | string | `BAAI/bge-base-en-v1.5` | Model name (HuggingFace or provider-specific) |
+| `provider` | string | `fastembed` | Embedding provider: `fastembed`, `ollama`, or `http` |
 | `keep_loaded` | string | `always` | Loading strategy |
+| `threads` | int | `2` | CPU threads for inference (fastembed only) |
+| `embedding_dim` | int | `768` | Output dimensions (must match model) |
+| `document_prefix` | string | `""` | Prefix prepended to texts when indexing |
+| `query_prefix` | string | `""` | Prefix prepended to texts when searching |
+| `base_url` | string | `""` | API base URL (required for ollama/http) |
+| `api_key` | string | `""` | API key (http provider only) |
 | `idle_timeout_seconds` | int | `0` | Auto-unload timeout |
 
 **Reranker slot:**
@@ -199,6 +236,55 @@ models:
   reranker:
     name: "cross-encoder/ms-marco-MiniLM-L-6-v2"
     keep_loaded: never
+```
+
+---
+
+## Embedding Providers
+
+The embedder supports three providers. Set `provider` in the embedder config to switch.
+
+### FastEmbed (Default)
+
+Local ONNX inference. No external services required.
+
+```yaml
+models:
+  embedder:
+    name: "BAAI/bge-base-en-v1.5"
+    provider: fastembed
+    keep_loaded: always
+    threads: 2
+    embedding_dim: 768
+```
+
+### Ollama
+
+Use an Ollama instance for embeddings. Requires a running Ollama server.
+
+```yaml
+models:
+  embedder:
+    name: "nomic-embed-text"
+    provider: ollama
+    keep_loaded: always
+    embedding_dim: 768
+    base_url: "http://localhost:11434"
+```
+
+### HTTP (OpenAI-compatible)
+
+Any OpenAI-compatible embedding endpoint. Supports optional API key authentication.
+
+```yaml
+models:
+  embedder:
+    name: "text-embedding-3-small"
+    provider: http
+    keep_loaded: always
+    embedding_dim: 1536
+    base_url: "http://localhost:8080/v1"
+    api_key: "sk-..."
 ```
 
 ---

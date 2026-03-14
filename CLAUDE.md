@@ -39,7 +39,7 @@ python run_tests.py
 ### Core Components (`vps_fastsearch/`)
 
 - **core.py** — Three main classes:
-  - `Embedder`: Wraps BAAI/bge-base-en-v1.5 (768-dim) via FastEmbed + ONNX Runtime
+  - `Embedder`: Multi-provider embedding (fastembed, ollama, http). Default: BAAI/bge-base-en-v1.5 (768-dim) via FastEmbed + ONNX Runtime
   - `Reranker`: Cross-encoder ms-marco-MiniLM via sentence-transformers (optional `[rerank]` extra)
   - `SearchDB`: SQLite database with FTS5 (BM25) and sqlite-vec (vector search), uses APSW bindings
 
@@ -47,7 +47,7 @@ python run_tests.py
 
 - **client.py** — `FastSearchClient` communicates with daemon over Unix socket. Auto-reconnect and context manager support.
 
-- **cli.py** — Click-based CLI (`vps-fastsearch`). Subcommands: `daemon`, `index`, `search`, `query`, `vector_search`, `config`, `stats`, `delete`, `update`, `embed`, `list`, `collection`, `model`, `migrate-paths`.
+- **cli.py** — Click-based CLI (`vps-fastsearch`). Subcommands: `daemon`, `index`, `search`, `query`, `vector_search`, `vsearch`, `config`, `stats`, `delete`, `update`, `embed`, `list`, `collection`, `model`, `migrate-paths`.
 
 - **config.py** — YAML configuration at `~/.config/fastsearch/config.yaml` with XDG compliance and environment variable overrides.
 
@@ -60,11 +60,12 @@ Uses **Reciprocal Rank Fusion (RRF)** to merge BM25 and vector results:
 
 ### Database Schema
 
-SQLite with WAL mode. Four key structures:
-1. `docs` table (id, source, chunk_index, content, metadata, created_at)
-2. `docs_fts` FTS5 virtual table with porter unicode61 tokenizer (auto-synced via triggers)
-3. `docs_vec` sqlite-vec virtual table for 768-dim cosine similarity search
-4. `db_meta` key-value table for database-level settings (e.g., `base_dir` for relative path resolution)
+SQLite with WAL mode, schema version 4. Five key structures:
+1. `chunks` table (id, source, chunk_index, content, metadata, created_at)
+2. `chunks_fts` FTS5 virtual table with porter unicode61 tokenizer (auto-synced via triggers)
+3. `chunks_vec` sqlite-vec virtual table for 768-dim cosine similarity search
+4. `documents` table (QMD-only, file-level tracking)
+5. `db_meta` key-value table for database-level settings (e.g., `base_dir` for relative path resolution)
 
 ### Daemon Protocol
 

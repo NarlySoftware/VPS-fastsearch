@@ -34,7 +34,7 @@ daemon for low-latency queries.
                  v             v               v
            Embedder        Reranker        SQLite + APSW
         (fastembed)    (CrossEncoder)     /      |       \
-     BAAI/bge-base    ms-marco-MiniLM   docs  docs_fts  docs_vec
+     BAAI/bge-base    ms-marco-MiniLM  chunks chunks_fts chunks_vec
        768-dim ONNX    L-6-v2            |    (FTS5)    (sqlite-vec)
                                          |       |          |
                                          +-------+----------+
@@ -45,7 +45,7 @@ daemon for low-latency queries.
 ### Data Flow
 
 **Indexing**: CLI reads files, chunks text (chunker.py), generates embeddings via daemon
-or direct Embedder, then inserts into SearchDB (docs + docs_vec tables; FTS5 synced via
+or direct Embedder, then inserts into SearchDB (chunks + chunks_vec tables; FTS5 synced via
 triggers).
 
 **Searching**: Client sends JSON-RPC request over Unix socket to daemon. Daemon loads
@@ -478,9 +478,12 @@ relevant. Results are ordered by `score ASC` (most relevant first).
 Vector search uses the `sqlite-vec` extension for approximate nearest neighbor search on
 768-dimensional float32 embeddings.
 
-**Embedding model**: BAAI/bge-base-en-v1.5, a 768-dimensional bi-encoder model running via
-ONNX Runtime through the FastEmbed library. Optimized for CPU inference with configurable
-thread count (default: 2). Model download is approximately 130 MB on first use.
+**Embedding model**: BAAI/bge-base-en-v1.5 (default), a 768-dimensional bi-encoder model.
+The `Embedder` class uses a `_backend` abstraction that supports three providers:
+- **fastembed** (default): ONNX Runtime inference via the FastEmbed library. Optimized for
+  CPU with configurable thread count (default: 2). ~130 MB download on first use.
+- **ollama**: Delegates embedding to a local Ollama server.
+- **http**: Delegates embedding to any OpenAI-compatible HTTP endpoint.
 
 **Distance metric**: Cosine distance (lower = more similar). The `vec0` virtual table stores
 embeddings as `float32[768]` (3,072 bytes per embedding) and supports `MATCH` queries with
@@ -565,7 +568,7 @@ stripped after reranking since they are no longer meaningful.
 ## 4. Database Schema
 
 The database uses SQLite via APSW bindings (not stdlib `sqlite3`) with the `sqlite-vec`
-loadable extension. The schema version is tracked via `PRAGMA user_version` (currently `3`).
+loadable extension. The schema version is tracked via `PRAGMA user_version` (currently `4`).
 
 ### PRAGMA Settings
 
@@ -576,19 +579,19 @@ loadable extension. The schema version is tracked via `PRAGMA user_version` (cur
 | `cache_size`          | `-4000`     | 4 MB page cache (negative = KB)                   |
 | `mmap_size`           | `268435456` | 256 MB memory-mapped I/O                          |
 | `wal_autocheckpoint`  | `1000`      | Checkpoint every 1000 pages                       |
-| `user_version`        | `3`         | Schema version for migration tracking              |
+| `user_version`        | `4`         | Schema version for migration tracking              |
 
 **Why WAL mode**: WAL allows concurrent read access while a single writer is active, which
 is critical for a daemon serving multiple simultaneous search requests. Without WAL, readers
 would block on writes and vice versa. The daemon also performs explicit
 `PRAGMA wal_checkpoint(PASSIVE)` on shutdown and when evicting cached database connections.
 
-### Table: `docs`
+### Table: `chunks`
 
-Primary document storage.
+Primary chunk storage.
 
 ```sql
-CREATE TABLE docs (
+CREATE TABLE chunks (
     id          INTEGER PRIMARY KEY,
     source      TEXT NOT NULL,
     chunk_index INTEGER NOT NULL,
@@ -597,8 +600,8 @@ CREATE TABLE docs (
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_docs_source ON docs(source);
-CREATE UNIQUE INDEX idx_docs_source_chunk ON docs(source, chunk_index);
+CREATE INDEX idx_chunks_source ON chunks(source);
+CREATE UNIQUE INDEX idx_chunks_source_chunk ON chunks(source, chunk_index);
 ```
 
 | Column       | Type      | Description                                      |
@@ -611,18 +614,18 @@ CREATE UNIQUE INDEX idx_docs_source_chunk ON docs(source, chunk_index);
 | `created_at` | TIMESTAMP | Insertion timestamp (`CURRENT_TIMESTAMP`)         |
 
 **Indexes**:
-- `idx_docs_source` on `(source)` -- fast lookup and deletion by source file.
-- `idx_docs_source_chunk` UNIQUE on `(source, chunk_index)` -- prevents duplicate chunks
+- `idx_chunks_source` on `(source)` -- fast lookup and deletion by source file.
+- `idx_chunks_source_chunk` UNIQUE on `(source, chunk_index)` -- prevents duplicate chunks
   from the same source.
 
-### Virtual Table: `docs_fts` (FTS5)
+### Virtual Table: `chunks_fts` (FTS5)
 
-Full-text search index, kept in sync with `docs` via triggers.
+Full-text search index, kept in sync with `chunks` via triggers.
 
 ```sql
-CREATE VIRTUAL TABLE docs_fts USING fts5(
+CREATE VIRTUAL TABLE chunks_fts USING fts5(
     content,
-    content='docs',
+    content='chunks',
     content_rowid='id',
     tokenize='porter unicode61'
 );
@@ -630,39 +633,39 @@ CREATE VIRTUAL TABLE docs_fts USING fts5(
 
 | Setting          | Value                | Description                            |
 |------------------|----------------------|----------------------------------------|
-| `content`        | `'docs'`             | External content table (content-sync)  |
-| `content_rowid`  | `'id'`               | Maps FTS rowid to `docs.id`            |
+| `content`        | `'chunks'`           | External content table (content-sync)  |
+| `content_rowid`  | `'id'`               | Maps FTS rowid to `chunks.id`          |
 | `tokenize`       | `'porter unicode61'` | Porter stemming + Unicode tokenization |
 
-**Sync Triggers**: Three triggers keep the FTS index synchronized with the `docs` table:
+**Sync Triggers**: Three triggers keep the FTS index synchronized with the `chunks` table:
 
 ```sql
 -- After insert: add new content to FTS
-CREATE TRIGGER docs_ai AFTER INSERT ON docs BEGIN
-    INSERT INTO docs_fts(rowid, content) VALUES (new.id, new.content);
+CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
+    INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
 END;
 
 -- After delete: remove content from FTS (using FTS5 delete command)
-CREATE TRIGGER docs_ad AFTER DELETE ON docs BEGIN
-    INSERT INTO docs_fts(docs_fts, rowid, content)
+CREATE TRIGGER chunks_ad AFTER DELETE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, content)
         VALUES('delete', old.id, old.content);
 END;
 
 -- After update: remove old content, add new content
-CREATE TRIGGER docs_au AFTER UPDATE ON docs BEGIN
-    INSERT INTO docs_fts(docs_fts, rowid, content)
+CREATE TRIGGER chunks_au AFTER UPDATE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, content)
         VALUES('delete', old.id, old.content);
-    INSERT INTO docs_fts(docs_fts, rowid, content)
+    INSERT INTO chunks_fts(chunks_fts, rowid, content)
         VALUES (new.id, new.content);
 END;
 ```
 
-### Virtual Table: `docs_vec` (sqlite-vec)
+### Virtual Table: `chunks_vec` (sqlite-vec)
 
 Vector similarity search index.
 
 ```sql
-CREATE VIRTUAL TABLE docs_vec USING vec0(
+CREATE VIRTUAL TABLE chunks_vec USING vec0(
     id        INTEGER PRIMARY KEY,
     embedding float32[768]
 );
@@ -670,7 +673,7 @@ CREATE VIRTUAL TABLE docs_vec USING vec0(
 
 | Column      | Type           | Description                                     |
 |-------------|----------------|-------------------------------------------------|
-| `id`        | INTEGER        | Foreign key to `docs.id`                        |
+| `id`        | INTEGER        | Foreign key to `chunks.id`                      |
 | `embedding` | float32[768]   | 768-dimensional embedding vector (3,072 bytes)  |
 
 **Distance metric**: Cosine distance (built into `vec0`).
@@ -679,8 +682,16 @@ CREATE VIRTUAL TABLE docs_vec USING vec0(
 serialized float32 vector and `k` is the number of nearest neighbors to return.
 
 Note: Unlike the FTS5 table, the vector table is **not** auto-synced via triggers.
-Insertions and deletions in `docs_vec` are managed explicitly in `index_document()`,
+Insertions and deletions in `chunks_vec` are managed explicitly in `index_document()`,
 `index_batch()`, and `delete_source()`, all within explicit transactions.
+
+### Table: `documents` (QMD only)
+
+File-level tracking table used by the QMD protocol for collection-based indexing. Tracks
+which files have been indexed into which collections, enabling incremental updates.
+
+This table is separate from the `chunks` table and is only populated by QMD `update` and
+`collection` commands.
 
 ### Table: `db_meta`
 
@@ -710,11 +721,11 @@ tables. Accessed via the `get_meta(key)` and `set_meta(key, value)` methods in `
 
 All write operations (`index_document`, `index_batch`, `delete_source`) use explicit
 `BEGIN`/`COMMIT` transactions with `ROLLBACK` on error. The `index_document` method inserts
-into `docs` (triggering FTS sync) and then `docs_vec` in a single transaction.
+into `chunks` (triggering FTS sync) and then `chunks_vec` in a single transaction.
 
 ### Schema Versioning
 
-Schema versioning uses `PRAGMA user_version` (currently `SCHEMA_VERSION = 3`). On database
+Schema versioning uses `PRAGMA user_version` (currently `SCHEMA_VERSION = 4`). On database
 open:
 - If the stored version is less than the code's version, migrations are applied and the
   version is updated.

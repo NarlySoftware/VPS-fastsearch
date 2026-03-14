@@ -29,6 +29,7 @@ vps-fastsearch [OPTIONS] COMMAND [ARGS]...
 | `config` | Manage configuration |
 | `query` | BM25/keyword search (QMD protocol) |
 | `vector_search` | Vector/semantic search (QMD protocol) |
+| `vsearch` | Hybrid search with cross-encoder reranking (QMD protocol) |
 | `update` | Reindex all registered collections (QMD protocol) |
 | `embed` | Run embedding pass (QMD protocol, no-op) |
 | `collection` | Manage QMD collections |
@@ -610,6 +611,40 @@ vps-fastsearch vector_search "deployment steps" -c workspace -n 3
 
 ---
 
+### vsearch
+
+Hybrid BM25 + vector search with cross-encoder reranking via the QMD protocol. Best quality for memory recall.
+
+```bash
+vps-fastsearch vsearch QUERY_TEXT [OPTIONS]
+```
+
+#### Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `QUERY_TEXT` | Yes | Search query text |
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-n` | `10` | Number of results to return |
+| `-c` | | Collection name filter |
+| `--json` | | JSON output (always on, hidden flag) |
+
+#### Example
+
+```bash
+# Hybrid search with reranking
+vps-fastsearch vsearch "how do I configure the system" --json
+
+# Limit results and filter by collection
+vps-fastsearch vsearch "deployment steps" -n 5 -c workspace
+```
+
+---
+
 ### update
 
 Reindex all registered collections. Walks each collection path, chunks files matching the collection pattern, generates embeddings (via daemon if available, otherwise direct), and indexes the results.
@@ -641,7 +676,7 @@ vps-fastsearch embed
 
 ### QMD Search Output Format
 
-Both `query` and `vector_search` output a JSON array of result objects:
+All three search commands (`query`, `vector_search`, and `vsearch`) output a JSON array of result objects:
 
 ```json
 [
