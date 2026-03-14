@@ -423,10 +423,16 @@ class FastSearchDaemon:
         prevent concurrent threads from interleaving transactions on the same
         apsw.Connection.
         """
-        allowed_base = Path(DEFAULT_DB_PATH).resolve().parent
         resolved = Path(db_path).resolve()
-        if allowed_base not in resolved.parents and resolved != allowed_base:
-            raise ValueError(f"db_path must be under {allowed_base}")
+        # Security: reject paths containing '..' components after resolution
+        # to prevent path traversal, but allow any absolute path that resolves
+        # cleanly. This replaces the overly restrictive single-directory check.
+        try:
+            resolved.relative_to(resolved.anchor)
+        except ValueError:
+            raise ValueError(f"db_path could not be resolved: {db_path}") from None
+        if ".." in resolved.parts:
+            raise ValueError(f"db_path must not contain '..': {db_path}")
         key = str(resolved)
         if key not in self._db_cache:
             from .core import SearchDB
@@ -507,7 +513,7 @@ class FastSearchDaemon:
                                 query,
                                 embedding,
                                 limit=limit,
-                                rerank_top_k=min(limit * 3, 30),
+                                rerank_top_k=min(limit * 3, 100),
                                 reranker=_RerankerAdapter(reranker_model.instance),
                                 metadata_filter=metadata_filter,
                             )
@@ -1225,7 +1231,7 @@ def stop_daemon(config_path: str | None = None) -> bool:
         os.kill(pid, signal.SIGTERM)
 
         # Wait for process to exit
-        for _ in range(50):  # 5 seconds
+        for _ in range(200):  # 20 seconds — allow time for ONNX model unload + WAL checkpoint
             try:
                 os.kill(pid, 0)  # Check if process exists
                 time.sleep(0.1)

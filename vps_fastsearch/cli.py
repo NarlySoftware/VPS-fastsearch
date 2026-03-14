@@ -279,16 +279,20 @@ def index(
                     click.echo(f"  Skipping {file_path.name} (no content)")
                     continue
 
-                # Generate embeddings
+                # Generate embeddings in safe-sized batches to avoid OOM on ARM64
+                EMBED_BATCH_SIZE = 10
                 t0 = time.perf_counter()
                 texts = [c[0] for c in chunks]
+                embeddings: list[list[float]] = []
 
-                if use_daemon:
-                    assert client is not None
-                    result = client.embed(texts)
-                    embeddings = result.get("embeddings", [])
-                else:
-                    embeddings = embedder.embed(texts)
+                for batch_start in range(0, len(texts), EMBED_BATCH_SIZE):
+                    batch = texts[batch_start : batch_start + EMBED_BATCH_SIZE]
+                    if use_daemon:
+                        assert client is not None
+                        result = client.embed(batch)
+                        embeddings.extend(result.get("embeddings", []))
+                    else:
+                        embeddings.extend(embedder.embed(batch))
 
                 embed_time = time.perf_counter() - t0
 
@@ -558,7 +562,7 @@ def search(
                                 query,
                                 embedding,
                                 limit=limit,
-                                rerank_top_k=min(limit * 3, 30),
+                                rerank_top_k=min(limit * 3, 100),
                                 metadata_filter=metadata_filter,
                             )
                         except ImportError as e:

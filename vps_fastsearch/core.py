@@ -416,6 +416,7 @@ class SearchDB:
         """)
 
         self._check_schema_version()
+        self._check_embedding_dims()
 
     def _check_schema_version(self) -> None:
         """Check and update database schema version using PRAGMA user_version."""
@@ -459,6 +460,29 @@ class SearchDB:
                 f"Updating database schema version from {current_version} to {SCHEMA_VERSION}"
             )
             self._execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def _check_embedding_dims(self) -> None:
+        """Verify stored embedding dimensions match EMBEDDING_DIM.
+
+        On first use, stores the current EMBEDDING_DIM in db_meta.
+        On subsequent opens, raises RuntimeError if there is a mismatch
+        (e.g. user switched models without reindexing).
+        """
+        row = list(self._execute("SELECT value FROM db_meta WHERE key = 'embedding_dims'"))
+        if row:
+            stored_dims = int(row[0][0])
+            if stored_dims != self.EMBEDDING_DIM:
+                raise RuntimeError(
+                    f"Embedding dimension mismatch: index has {stored_dims}-dim vectors "
+                    f"but current model produces {self.EMBEDDING_DIM}-dim. "
+                    f"Run: vps-fastsearch index --reindex to rebuild."
+                )
+        else:
+            # First time — record current dims
+            self._execute(
+                "INSERT OR IGNORE INTO db_meta (key, value) VALUES ('embedding_dims', ?)",
+                (str(self.EMBEDDING_DIM),),
+            )
 
     def find_sources(self, pattern: str) -> list[str]:
         """Find sources matching a partial name pattern (LIKE query).
@@ -599,9 +623,23 @@ class SearchDB:
                     doc_ids.append(-1)
                     continue
 
+                # Use INSERT OR REPLACE for idempotent retries — if the same
+                # (source, chunk_index) pair already exists (e.g. from a retried
+                # request after timeout), it will be overwritten safely.
+                # First check if a row already exists so we can clean up docs_vec.
+                existing = list(
+                    self._execute(
+                        "SELECT id FROM docs WHERE source = ? AND chunk_index = ?",
+                        (source, chunk_index),
+                    )
+                )
+                if existing:
+                    old_id = existing[0][0]
+                    self._execute("DELETE FROM docs_vec WHERE id = ?", (old_id,))
+
                 self._execute(
                     """
-                    INSERT INTO docs (source, chunk_index, content, metadata, content_hash)
+                    INSERT OR REPLACE INTO docs (source, chunk_index, content, metadata, content_hash)
                     VALUES (?, ?, ?, ?, ?)
                     """,
                     (
@@ -673,11 +711,11 @@ class SearchDB:
                 d.chunk_index,
                 d.content,
                 d.metadata,
-                bm25(docs_fts) as score
+                -bm25(docs_fts) as score
             FROM docs_fts f
             JOIN docs d ON f.rowid = d.id
             WHERE docs_fts MATCH ?{meta_sql}
-            ORDER BY score
+            ORDER BY score DESC
             LIMIT ?
             """,
             (fts_query, *meta_params, limit),
