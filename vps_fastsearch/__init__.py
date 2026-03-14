@@ -15,7 +15,7 @@ from .core import (
     get_reranker,
 )
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 __all__ = [
     # Core classes
     "Embedder",

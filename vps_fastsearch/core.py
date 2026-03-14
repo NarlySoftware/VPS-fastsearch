@@ -556,7 +556,7 @@ class SearchDB:
                 # No auto-migration — user must delete and re-index.
                 raise RuntimeError(
                     f"Database uses old schema v{current_version} (table 'docs'). "
-                    f"VPS-FastSearch v0.3.2+ uses 'chunks' tables. "
+                    f"VPS-FastSearch v0.3.3+ uses 'chunks' tables. "
                     f"Delete {self.db_path} and re-index: "
                     f"vps-fastsearch index <path> or vps-fastsearch update"
                 )
