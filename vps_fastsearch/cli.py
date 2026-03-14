@@ -1,6 +1,7 @@
 """VPS-FastSearch CLI - Index and search documents with optional daemon mode."""
 
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -16,6 +17,53 @@ from .config import DEFAULT_CONFIG_PATH, DEFAULT_DB_PATH, create_default_config,
 from .core import Embedder, SearchDB
 
 logger = logging.getLogger(__name__)
+
+
+def _is_qmd_mode() -> bool:
+    """Detect if we're being called by OpenClaw as a QMD subprocess."""
+    return "QMD_CONFIG_DIR" in os.environ
+
+
+def _qmd_db_path() -> str:
+    """Return the QMD-expected database path: $XDG_CACHE_HOME/qmd/index.sqlite."""
+    xdg_cache = os.environ.get("XDG_CACHE_HOME", os.path.join(Path.home(), ".cache"))
+    db_dir = Path(xdg_cache) / "qmd"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    return str(db_dir / "index.sqlite")
+
+
+def _qmd_config_path() -> str | None:
+    """Return config path for QMD mode.
+
+    OpenClaw sets XDG_CONFIG_HOME to a sandboxed dir where config.yaml
+    won't exist. Fall back to the real user config.
+    """
+    # Check sandboxed config first
+    sandboxed = os.environ.get("QMD_CONFIG_DIR") or os.environ.get("XDG_CONFIG_HOME")
+    if sandboxed:
+        sandboxed_config = Path(sandboxed) / "fastsearch" / "config.yaml"
+        if sandboxed_config.exists():
+            return str(sandboxed_config)
+
+    # Fall back to real user config
+    real_config = Path.home() / ".config" / "fastsearch" / "config.yaml"
+    if real_config.exists():
+        return str(real_config)
+
+    return None
+
+
+def _setup_qmd_env() -> None:
+    """Set environment variables for QMD sandbox compatibility.
+
+    Points fastembed model cache at the QMD models directory so OpenClaw's
+    symlinked models are found.
+    """
+    xdg_cache = os.environ.get("XDG_CACHE_HOME", os.path.join(Path.home(), ".cache"))
+    fastembed_cache = str(Path(xdg_cache) / "qmd")
+    # fastembed respects FASTEMBED_CACHE_PATH
+    if "FASTEMBED_CACHE_PATH" not in os.environ:
+        os.environ["FASTEMBED_CACHE_PATH"] = fastembed_cache
 
 
 def _get_embedder(config_path: str | None = None) -> Embedder:
@@ -45,6 +93,17 @@ def _get_embedder(config_path: str | None = None) -> Embedder:
 def cli(ctx: click.Context, db: str, config_path: str | None) -> None:
     """VPS-FastSearch - Fast memory/vector search for CPU-only VPS."""
     ctx.ensure_object(dict)
+
+    # QMD sandbox: override paths when called by OpenClaw
+    if _is_qmd_mode():
+        _setup_qmd_env()
+        # Use QMD db path unless explicitly overridden by --db or FASTSEARCH_DB
+        if db == DEFAULT_DB_PATH and "FASTSEARCH_DB" not in os.environ:
+            db = _qmd_db_path()
+        # Use QMD config path unless explicitly provided
+        if config_path is None and "FASTSEARCH_CONFIG" not in os.environ:
+            config_path = _qmd_config_path()
+
     ctx.obj["db_path"] = db
     ctx.obj["config_path"] = config_path
 
