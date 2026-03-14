@@ -401,11 +401,13 @@ class SearchDB:
         sql = " AND " + " AND ".join(clauses)
         return sql, tuple(params)
 
-    def __init__(self, db_path: str | Path | None = None) -> None:
+    def __init__(self, db_path: str | Path | None = None, embedding_dim: int | None = None) -> None:
         if db_path is None:
             from .config import DEFAULT_DB_PATH
 
             db_path = os.environ.get("FASTSEARCH_DB", DEFAULT_DB_PATH)
+        if embedding_dim is not None:
+            self.EMBEDDING_DIM = embedding_dim
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = apsw.Connection(str(self.db_path))
@@ -511,10 +513,10 @@ class SearchDB:
         """)
 
         # Vector virtual table for embedding search
-        self._execute("""
+        self._execute(f"""
             CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(
                 id INTEGER PRIMARY KEY,
-                embedding float32[768]
+                embedding float32[{self.EMBEDDING_DIM}]
             )
         """)
 

@@ -107,6 +107,19 @@ def cli(ctx: click.Context, db: str, config_path: str | None) -> None:
     ctx.obj["db_path"] = db
     ctx.obj["config_path"] = config_path
 
+    # Load embedding_dim from config for SearchDB construction
+    cfg = load_config(config_path)
+    embedder_cfg = cfg.models.get("embedder")
+    ctx.obj["embedding_dim"] = embedder_cfg.embedding_dim if embedder_cfg else 768
+
+
+def _make_searchdb(ctx: click.Context, db_path: str | None = None) -> SearchDB:
+    """Create a SearchDB with the configured embedding_dim."""
+    return SearchDB(
+        db_path or ctx.obj["db_path"],
+        embedding_dim=ctx.obj.get("embedding_dim", 768),
+    )
+
 
 # ============================================================================
 # Daemon Commands
@@ -314,7 +327,7 @@ def model_swap(ctx: click.Context, model_name: str, reindex: bool) -> None:
     # Reset the embedder singleton so it picks up the new model
     Embedder._instance = None
 
-    db = SearchDB(db_path)
+    db = _make_searchdb(ctx)
     try:
         # Get all documents
         rows = list(
@@ -434,7 +447,7 @@ def index(
 ) -> None:
     """Index a file or directory of documents."""
     index_path = Path(path).resolve()
-    db = SearchDB(ctx.obj["db_path"])
+    db = _make_searchdb(ctx)
 
     try:
         # Set up base directory for portable relative path storage
@@ -773,7 +786,7 @@ def search(
                     err=True,
                 )
                 sys.exit(1)
-            db = SearchDB(db_path)
+            db = _make_searchdb(ctx)
 
             try:
                 if mode == "bm25":
@@ -844,7 +857,7 @@ def stats(ctx: click.Context) -> None:
         click.echo(f"Database not found: {db_path}", err=True)
         return
 
-    db = SearchDB(db_path)
+    db = _make_searchdb(ctx)
     try:
         stats = db.get_stats()
 
@@ -876,7 +889,7 @@ def delete(ctx: click.Context, source: str | None, doc_id: int | None) -> None:
         click.echo("Provide a SOURCE argument or --id option.", err=True)
         sys.exit(1)
 
-    db = SearchDB(ctx.obj["db_path"])
+    db = _make_searchdb(ctx)
 
     try:
         if doc_id is not None:
@@ -921,7 +934,7 @@ def list_sources(ctx: click.Context, output_json: bool) -> None:
         click.echo(f"Database not found: {db_path}", err=True)
         return
 
-    db = SearchDB(db_path)
+    db = _make_searchdb(ctx)
     try:
         sources = db.list_sources()
 
@@ -986,7 +999,7 @@ def migrate_paths(
         click.echo(f"Database not found: {db_path}", err=True)
         sys.exit(1)
 
-    db = SearchDB(db_path)
+    db = _make_searchdb(ctx)
     try:
         if base_dir is not None:
             db.set_base_dir(base_dir)
@@ -1233,7 +1246,7 @@ def _qmd_search(
             if not Path(db_path).exists():
                 click.echo("no results found.")
                 return
-            db = SearchDB(db_path)
+            db = _make_searchdb(ctx)
             try:
                 if mode == "bm25":
                     results = db.search_bm25(
@@ -1282,7 +1295,7 @@ def _qmd_search(
     collections: list[dict[str, str]] = []
     snippets: dict[int, str] = {}
     if Path(db_path).exists():
-        _db = SearchDB(db_path)
+        _db = _make_searchdb(ctx)
         try:
             collections = _load_collections(_db)
             for r in results:
@@ -1396,7 +1409,7 @@ def qmd_update(ctx: click.Context) -> None:
     if not Path(db_path).exists():
         return
 
-    db = SearchDB(db_path)
+    db = _make_searchdb(ctx)
     try:
         _qmd_init_schema(db)
         collections = _load_collections(db)
@@ -1428,7 +1441,7 @@ def qmd_update(ctx: click.Context) -> None:
             file_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
             rel_path = str(file_path.relative_to(coll_path))
 
-            db = SearchDB(db_path)
+            db = _make_searchdb(ctx)
             try:
                 _qmd_init_schema(db)
                 rows = list(db._execute(
@@ -1474,7 +1487,7 @@ def qmd_update(ctx: click.Context) -> None:
                     embeddings.extend(embedder.embed(batch))
 
             # Index chunks and update documents table
-            db = SearchDB(db_path)
+            db = _make_searchdb(ctx)
             try:
                 _qmd_init_schema(db)
                 source = db.to_relative(file_path.resolve())
@@ -1527,9 +1540,7 @@ def collection() -> None:
 @click.pass_context
 def collection_add(ctx: click.Context, path: str, name: str, mask: str) -> None:
     """Register a collection path for QMD indexing."""
-    db_path = ctx.obj["db_path"]
-
-    db = SearchDB(db_path)
+    db = _make_searchdb(ctx)
     try:
         _qmd_init_schema(db)
         collections = _load_collections(db)
@@ -1557,7 +1568,7 @@ def collection_remove(ctx: click.Context, name: str) -> None:
         click.echo(f"Collection '{name}' not found", err=True)
         sys.exit(1)
 
-    db = SearchDB(db_path)
+    db = _make_searchdb(ctx)
     try:
         _qmd_init_schema(db)
         collections = _load_collections(db)
@@ -1593,7 +1604,7 @@ def collection_list(ctx: click.Context, output_json: bool) -> None:
             click.echo("No collections registered.")
         return
 
-    db = SearchDB(db_path)
+    db = _make_searchdb(ctx)
     try:
         collections = _load_collections(db)
 

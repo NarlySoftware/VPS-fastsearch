@@ -46,6 +46,7 @@ class ModelConfig:
     provider: str = "fastembed"
     base_url: str = ""
     api_key: str = ""
+    embedding_dim: int = 768
 
 
 @dataclass
@@ -142,6 +143,12 @@ class FastSearchConfig:
                 provider = str(model_data.get("provider", "fastembed"))
                 base_url = str(model_data.get("base_url", ""))
                 api_key = str(model_data.get("api_key", ""))
+                embedding_dim = model_data.get("embedding_dim", 768)
+                if not isinstance(embedding_dim, int) or embedding_dim < 1:
+                    logger.warning(
+                        f"Invalid embedding_dim: {embedding_dim!r}, using default 768"
+                    )
+                    embedding_dim = 768
 
                 models[name] = ModelConfig(
                     name=model_data.get("name", ""),
@@ -153,6 +160,7 @@ class FastSearchConfig:
                     provider=provider,
                     base_url=base_url,
                     api_key=api_key,
+                    embedding_dim=embedding_dim,
                 )
 
         memory_data = data.get("memory", {})
@@ -224,6 +232,7 @@ class FastSearchConfig:
                     **({"provider": model.provider} if model.provider != "fastembed" else {}),
                     **({"base_url": model.base_url} if model.base_url else {}),
                     **({"api_key": model.api_key} if model.api_key else {}),
+                    **({"embedding_dim": model.embedding_dim} if model.embedding_dim != 768 else {}),
                 }
                 for name, model in self.models.items()
             },
