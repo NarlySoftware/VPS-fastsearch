@@ -32,6 +32,7 @@ vps-fastsearch [OPTIONS] COMMAND [ARGS]...
 | `update` | Reindex all registered collections (QMD protocol) |
 | `embed` | Run embedding pass (QMD protocol, no-op) |
 | `collection` | Manage QMD collections |
+| `model` | Manage embedding models |
 
 ---
 
@@ -753,6 +754,51 @@ docs (qmd://docs)
     "pattern": "**/*.md"
   }
 ]
+```
+
+---
+
+## model
+
+Manage embedding models. Currently supports swapping the active model with optional reindexing.
+
+### model swap
+
+Swap the embedding model and optionally re-embed all documents.
+
+```bash
+vps-fastsearch model swap MODEL_NAME [OPTIONS]
+```
+
+#### Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `MODEL_NAME` | Yes | Name of the new embedding model |
+
+#### Options
+
+| Option | Description |
+|--------|-------------|
+| `--reindex` | Re-embed all existing documents with the new model |
+
+#### Behavior
+
+1. Updates the config file on disk with the new model name
+2. If daemon is running: unloads old model, reloads config, loads new model
+3. If `--reindex`: validates the new model's dimensions, clears the vector table, and re-embeds all documents with progress output
+
+#### Examples
+
+```bash
+# Swap to a different FastEmbed model (same 768-dim)
+vps-fastsearch model swap BAAI/bge-base-en-v1.5 --reindex
+
+# Swap provider to Ollama (edit config.yaml to set provider: ollama first)
+vps-fastsearch model swap nomic-embed-text --reindex
+
+# Swap model without reindexing (dim guard will catch mismatches on next use)
+vps-fastsearch model swap BAAI/bge-small-en-v1.5
 ```
 
 ---

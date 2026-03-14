@@ -126,7 +126,7 @@ class _OllamaBackend:
 
 
 class _HTTPBackend:
-    """OpenAI-compatible HTTP embedding backend — calls /v1/embeddings."""
+    """OpenAI-compatible HTTP embedding backend — calls {base_url}/embeddings."""
 
     def __init__(self, model_name: str, base_url: str, api_key: str = "") -> None:
         self._model_name = model_name

@@ -47,7 +47,7 @@ python run_tests.py
 
 - **client.py** — `FastSearchClient` communicates with daemon over Unix socket. Auto-reconnect and context manager support.
 
-- **cli.py** — Click-based CLI (`vps-fastsearch`). Subcommands: `daemon`, `index`, `search`, `query`, `vector_search`, `config`, `stats`, `delete`, `update`, `embed`, `list`, `collection`, `migrate-paths`.
+- **cli.py** — Click-based CLI (`vps-fastsearch`). Subcommands: `daemon`, `index`, `search`, `query`, `vector_search`, `config`, `stats`, `delete`, `update`, `embed`, `list`, `collection`, `model`, `migrate-paths`.
 
 - **config.py** — YAML configuration at `~/.config/fastsearch/config.yaml` with XDG compliance and environment variable overrides.
 
