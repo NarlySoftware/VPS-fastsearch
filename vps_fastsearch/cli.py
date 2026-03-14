@@ -89,23 +89,29 @@ def _get_embedder(config_path: str | None = None) -> Embedder:
 @click.option(
     "--config", "config_path", default=None, help="Config file path", envvar="FASTSEARCH_CONFIG"
 )
+@click.option("--verbose", "-v", is_flag=True, help="Show diagnostic info (DB path, QMD mode)")
 @click.pass_context
-def cli(ctx: click.Context, db: str, config_path: str | None) -> None:
+def cli(ctx: click.Context, db: str, config_path: str | None, verbose: bool) -> None:
     """VPS-FastSearch - Fast memory/vector search for CPU-only VPS."""
     ctx.ensure_object(dict)
 
-    # QMD sandbox: override paths when called by OpenClaw
+    # QMD sandbox: override paths when called by OpenClaw.
+    # In QMD mode, ALWAYS use the QMD database path. OpenClaw manages its
+    # own index at $XDG_CACHE_HOME/qmd/index.sqlite. FASTSEARCH_DB from
+    # .bashrc or systemd must not override this.
     if _is_qmd_mode():
         _setup_qmd_env()
-        # Use QMD db path unless explicitly overridden by --db or FASTSEARCH_DB
-        if db == DEFAULT_DB_PATH and "FASTSEARCH_DB" not in os.environ:
-            db = _qmd_db_path()
-        # Use QMD config path unless explicitly provided
-        if config_path is None and "FASTSEARCH_CONFIG" not in os.environ:
+        db = _qmd_db_path()
+        if config_path is None:
             config_path = _qmd_config_path()
 
     ctx.obj["db_path"] = db
     ctx.obj["config_path"] = config_path
+
+    if verbose:
+        click.echo(f"[verbose] DB path: {db}", err=True)
+        click.echo(f"[verbose] Config: {config_path or 'default'}", err=True)
+        click.echo(f"[verbose] QMD mode: {_is_qmd_mode()}", err=True)
 
     # Load embedding_dim from config for SearchDB construction
     cfg = load_config(config_path)
@@ -1297,34 +1303,60 @@ def _qmd_search(
         click.echo("no results found.")
         return
 
-    # Load collections and generate snippets
+    # Load collections, snippets, and document metadata for QMD output
     collections: list[dict[str, str]] = []
     snippets: dict[int, str] = {}
+    # Map source -> (collection_name, rel_path, file_hash) from documents table
+    doc_info: dict[str, tuple[str, str, str]] = {}
     if Path(db_path).exists():
         _db = _make_searchdb(ctx)
         try:
             collections = _load_collections(_db)
+            _qmd_init_schema(_db)
             for r in results:
                 r["_abs_source"] = _db.to_absolute(r["source"])
                 snippets[r["id"]] = _qmd_get_snippet(_db, query_text, r["id"], mode)
+
+            # Look up documents table for file paths relative to collection root
+            for r in results:
+                src = r["source"]
+                if src not in doc_info:
+                    abs_p = Path(r["_abs_source"])
+                    for coll in collections:
+                        coll_root = Path(coll["path"])
+                        try:
+                            rel = str(abs_p.relative_to(coll_root))
+                            # Look up hash from documents table
+                            rows = list(_db._execute(
+                                "SELECT hash FROM documents "
+                                "WHERE collection = ? AND path = ? AND active = 1",
+                                (coll["name"], rel),
+                            ))
+                            file_hash = rows[0][0] if rows else ""
+                            doc_info[src] = (coll["name"], rel, file_hash or "")
+                            break
+                        except ValueError:
+                            continue
         finally:
             _db.close()
     else:
         for r in results:
             r["_abs_source"] = r["source"]
 
+    # Warn if collection filter matched nothing
+    if collection and not results:
+        click.echo(f"warning: collection '{collection}' not found in active database", err=True)
+
     # Format as QMD JSON output
     qmd_results: list[dict[str, Any]] = []
     for r in results:
         # Normalize score to 0-1
         if rerank and "rerank_score" in r:
-            # Cross-encoder scores are typically -10 to +10; sigmoid normalize
             import math
 
             raw = float(r["rerank_score"])
             score = 1.0 / (1.0 + math.exp(-raw))
         elif "rrf_score" in r:
-            # RRF scores are small positives; scale relative to top result
             score = float(r["rrf_score"])
         elif "score" in r:
             score = float(r["score"])
@@ -1333,24 +1365,19 @@ def _qmd_search(
         else:
             score = 0.0
 
-        # Resolve file path relative to collection root
-        abs_path = Path(r["_abs_source"])
-        file_path = str(abs_path)
+        # Use documents table for file path (relative to collection root) and hash-based docid
+        src = r["source"]
         result_collection = r.get("metadata", {}).get("collection", collection or "")
-
-        for coll in collections:
-            coll_root = Path(coll["path"])
-            try:
-                file_path = str(abs_path.relative_to(coll_root))
-                if not result_collection:
-                    result_collection = coll["name"]
-                break
-            except ValueError:
-                continue
-
-        # Build docid: <collection>/<path>:<chunk_index>
-        chunk_idx = r.get("chunk_index", 0)
-        docid = f"{result_collection}/{file_path}:{chunk_idx}" if result_collection else file_path
+        if src in doc_info:
+            coll_name, rel_path, file_hash = doc_info[src]
+            file_path = rel_path
+            if not result_collection:
+                result_collection = coll_name
+            # docid = file hash (matches documents.hash for OpenClaw resolution)
+            docid = file_hash if file_hash else ""
+        else:
+            file_path = r["source"]
+            docid = ""
 
         snippet = snippets.get(r["id"], r.get("content", "")[:200])
 
